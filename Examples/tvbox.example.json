@@ -1,0 +1,8 @@
+{
+  "name": "我的 TVBox 配置",
+  "sites": [
+    { "key": "my-json-cms", "name": "我的 JSON 影视接口", "type": 1, "api": "https://example.com/api.php/provide/vod/", "searchable": 1 },
+    { "key": "my-xml-cms", "name": "我的 XML 影视接口", "type": 0, "api": "https://example.com/api.php/provide/vod/at/xml/", "searchable": 1 }
+  ],
+  "lives": [{ "name": "我的直播", "url": "./live.example.m3u" }]
+}

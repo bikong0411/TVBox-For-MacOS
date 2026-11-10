@@ -1,0 +1,20 @@
+#!/bin/bash
+set -euo pipefail
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+swift build -c release
+BIN_DIR="$(swift build -c release --show-bin-path)"
+APP_DIR="$PROJECT_DIR/dist/Release/TVBox.app"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+mkdir -p "$APP_DIR/Contents/Helpers"
+bash "$PROJECT_DIR/scripts/build-remux.sh"
+cp "$PROJECT_DIR/.build/remux/tvbox-remux" "$APP_DIR/Contents/Helpers/tvbox-remux"
+cp "$PROJECT_DIR/.build/remux/COPYING.LGPLv2.1" "$APP_DIR/Contents/Resources/FFmpeg-LICENSE.txt"
+codesign --force --sign - "$APP_DIR/Contents/Helpers/tvbox-remux"
+cp "$BIN_DIR/TVBoxMac" "$APP_DIR/Contents/MacOS/TVBoxMac"
+cp "$PROJECT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+swift "$PROJECT_DIR/scripts/make-icon.swift" "$PROJECT_DIR/dist"
+iconutil -c icns "$PROJECT_DIR/dist/TVBox.iconset" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
+codesign --force --sign - "$APP_DIR"
+ditto -c -k --keepParent "$APP_DIR" "$PROJECT_DIR/dist/TVBox-macOS-AppleSilicon.zip"
+echo "App: $APP_DIR"

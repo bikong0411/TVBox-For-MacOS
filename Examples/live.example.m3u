@@ -1,0 +1,4 @@
+#EXTM3U
+# 示例模板：将 example.com 地址替换为你自己的有效直播地址。
+#EXTINF:-1 group-title="我的频道",示例频道
+https://example.com/live/stream.m3u8
