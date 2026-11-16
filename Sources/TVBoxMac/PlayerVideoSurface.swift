@@ -14,6 +14,8 @@ import VLCKit
     private var observations: [NSKeyValueObservation] = []
     private var fullscreenHost = false
     private var pendingPiP = false
+    private var pipTimeout: Task<Void, Never>?
+    var pictureInPictureSupported: Bool { pip != nil }
     func setSystemPlayback(_ value: Bool) { view.setSystemPlayback(value) }
     func setFullscreenHost(_ value: Bool) { fullscreenHost = value }
     init(player: AVPlayer) {
@@ -29,7 +31,7 @@ import VLCKit
                         Task { @MainActor in
                             guard let self else { return }
                             self.pictureInPicturePossible = pip.isPictureInPicturePossible
-                            if self.pendingPiP && pip.isPictureInPicturePossible { self.pendingPiP = false; pip.startPictureInPicture() }
+                            if self.pendingPiP && pip.isPictureInPicturePossible { self.pendingPiP = false; self.pipTimeout?.cancel(); pip.startPictureInPicture() }
                         }
                     },
                     pip.observe(\.isPictureInPictureActive, options: [.initial, .new]) { [weak self] pip, _ in
@@ -54,15 +56,23 @@ import VLCKit
     }
     func detach(from host: VideoHostView) { if view.superview === host { view.removeFromSuperview() } }
     func togglePictureInPicture() {
-        guard let pip else { return }
+        guard let pip else { pictureInPictureError = "此设备暂不支持系统画中画。"; return }
         if pip.isPictureInPictureActive { pip.stopPictureInPicture() }
-        else if pip.isPictureInPicturePossible { pip.startPictureInPicture() }
+        else { requestPictureInPicture() }
     }
     func requestPictureInPicture() {
         guard let pip else { pictureInPictureError = "此设备暂不支持系统画中画。"; return }
-        if pip.isPictureInPicturePossible { pip.startPictureInPicture() } else { pendingPiP = true }
+        pipTimeout?.cancel()
+        if pip.isPictureInPicturePossible { pip.startPictureInPicture() } else {
+            pendingPiP = true
+            pipTimeout = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: 8_000_000_000) } catch { return }
+                guard let self, self.pendingPiP else { return }
+                self.pendingPiP = false; self.pictureInPictureError = "这个视频暂时无法开启画中画，可以继续在窗口或全屏中观看。"
+            }
+        }
     }
-    func stopPictureInPicture() { pendingPiP = false; if pip?.isPictureInPictureActive == true { pip?.stopPictureInPicture() } }
+    func stopPictureInPicture() { pendingPiP = false; pipTimeout?.cancel(); if pip?.isPictureInPictureActive == true { pip?.stopPictureInPicture() } }
     nonisolated func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
         Task { @MainActor [weak self] in self?.pictureInPictureError = "暂时无法启动画中画，请稍后重试。" }
     }
@@ -72,6 +82,7 @@ final class VideoRenderingView: NSView {
     let videoLayer = AVPlayerLayer()
     private(set) var vlcView = VLCVideoView(frame: .zero)
     private let systemView = NSView(frame: .zero)
+    private var mpvView: MPVRenderingView?
     var onPointerActivity: (() -> Void)?
     private var pointerTracking: NSTrackingArea?
     init(player: AVPlayer) {
@@ -94,9 +105,14 @@ final class VideoRenderingView: NSView {
         vlcView = next
         return next
     }
-    func setSystemPlayback(_ value: Bool) { systemView.isHidden = !value; vlcView.isHidden = value }
+    func setMPVView(_ value: MPVRenderingView?) {
+        mpvView?.removeFromSuperview(); mpvView = value
+        if let value { value.frame = bounds; addSubview(value, positioned: .below, relativeTo: systemView) }
+        vlcView.isHidden = value != nil || !systemView.isHidden
+    }
+    func setSystemPlayback(_ value: Bool) { systemView.isHidden = !value; vlcView.isHidden = value || mpvView != nil; mpvView?.isHidden = value }
     override func layout() {
-        super.layout(); vlcView.frame = bounds; systemView.frame = bounds
+        super.layout(); vlcView.frame = bounds; systemView.frame = bounds; mpvView?.frame = bounds
         CATransaction.begin(); CATransaction.setDisableActions(true); videoLayer.frame = systemView.bounds; CATransaction.commit()
     }
     override func hitTest(_ point: NSPoint) -> NSView? { bounds.contains(convert(point, from: superview)) ? self : nil }

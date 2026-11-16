@@ -27,7 +27,7 @@ import AppKit
             CommandMenu("播放") {
                 Button("切换播放全屏") { store.fullscreen.toggle(store: store) }.keyboardShortcut("f", modifiers: [.command, .control]).disabled(store.playback == nil)
                 Divider()
-                Button("播放 / 暂停") { store.player.togglePlayback() }.keyboardShortcut(.space, modifiers: [])
+                Button("播放 / 暂停") { store.player.togglePlayback() }.keyboardShortcut(.space, modifiers: []).disabled(store.playback == nil)
                 Button("下一集") { store.nextEpisode() }.keyboardShortcut(.rightArrow, modifiers: [.command])
                 Button("停止播放") { store.stop() }.keyboardShortcut(".")
             }

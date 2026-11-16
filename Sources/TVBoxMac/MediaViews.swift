@@ -157,6 +157,7 @@ private struct PlayerContent: View {
                         Button { fullscreen.toggle(store: store) } label: { Label(fullscreen.isPresented ? "返回窗口" : "全屏", systemImage: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help("双击画面或按 Control + Command + F 切换全屏")
                         if current.isLive { Label(current.catchupProgramme == nil ? "LIVE" : "回看", systemImage: current.catchupProgramme == nil ? "dot.radiowaves.left.and.right" : "clock.arrow.circlepath").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent) }
                     }.font(.system(size: 12))
+                    if let notice = controller.componentNotice { Text(notice).font(.system(size: 12)).foregroundStyle(Theme.muted) }
                     PlaybackSurface(controller: controller, fullscreen: fullscreen).aspectRatio(16 / 9, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 12))
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 7) {
@@ -170,9 +171,15 @@ private struct PlayerContent: View {
                             Button("上一台") { store.switchChannel(-1) }.disabled(!store.canSwitchChannel(-1)).controlSize(.small)
                             Button("下一台") { store.switchChannel(1) }.disabled(!store.canSwitchChannel(1)).controlSize(.small)
                         }
-                        Menu { ForEach([Float(0.5), 1, 1.25, 1.5, 2], id: \.self) { rate in Button("\(String(format: "%g", rate))×") { controller.setRate(rate) } } } label: { Text("\(String(format: "%g", controller.rate))×") }.frame(width: 70)
+                        Text(controller.playbackEngine).font(.system(size: 10)).foregroundStyle(Theme.muted)
+                        PlaybackRateMenu(controller: controller, casting: controller.dlna)
                         Button { store.toggleFavorite(current.video, site: current.site) } label: { Image(systemName: store.isFavorite(current.video, site: current.site) ? "heart.fill" : "heart") }.disabled(current.isLive)
-                        Menu { Button("复制播放地址") { store.copyURL() } } label: { Image(systemName: "ellipsis") }.frame(width: 45)
+                        Menu {
+                            Button("使用内置 VLC") { store.useBuiltInPlayback() }
+                            Button("使用 IINA 播放组件") { store.useIINAPlayback() }
+                            Divider()
+                            Button("复制播放地址") { store.copyURL() }
+                        } label: { Image(systemName: "ellipsis") }.frame(width: 45)
                     }
                     if current.line.episodes.count > 1 {
                         HStack { Text(current.isLive ? "切换线路" : "剧集").font(.system(size: 15, weight: .semibold)); Spacer(); if !current.isLive { Button("下一集") { store.nextEpisode() }.disabled(current.index + 1 >= current.line.episodes.count) } }
@@ -213,6 +220,7 @@ struct PlaybackSurface: View {
                     return true
                 }) { fullscreen.toggle(store: store) }
                 AirPlayPlaybackStatus(surface: controller.videoSurface)
+                DLNAPlaybackStatus(controller: controller, casting: controller.dlna)
                 if let error = controller.error {
                     VStack(spacing: 15) {
                         Image(systemName: "exclamationmark.circle").font(.system(size: 35)).foregroundStyle(Theme.accent)
@@ -235,7 +243,10 @@ struct PlaybackSurface: View {
                             if let video = Demo.videos.first, let line = video.lines.first { store.play(video: video, site: nil, line: line, index: 0) }
                         }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(Theme.accent)
                     }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity).background(.black.opacity(0.85))
-                } else if !controller.ready { ProgressView(controller.connectingMessage).padding(20).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 9)).allowsHitTesting(false) }
+                } else if !controller.ready { PlaybackConnectionStatus(controller: controller) { store.stop() } }
+                if controller.ready && controller.buffering && controller.dlna.selectedDevice == nil {
+                    VStack { HStack { Spacer(); ProgressView("正在缓冲…").controlSize(.small).padding(10).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8)) }; Spacer() }.padding(14).allowsHitTesting(false)
+                }
                 VStack {
                     Spacer(minLength: 0)
                     PlaybackTransportControls(controller: controller, surface: controller.videoSurface, live: current.isLive && current.catchupProgramme == nil, isFullscreen: isFullscreen) { fullscreen.toggle(store: store) }

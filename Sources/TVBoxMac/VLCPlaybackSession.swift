@@ -48,8 +48,9 @@ import AppKit
     }
     var position: Double { requestedPosition ?? max(0, Double(player.time.intValue) / 1000) }
     var duration: Double { max(0, Double(player.media?.length.intValue ?? 0) / 1000) }
-    var playing: Bool { !paused && player.isPlaying }
+    var playing: Bool { !paused && started && ![VLCMediaPlayerState.ended, .error, .stopped].contains(player.state) }
     var seekable: Bool { player.isSeekable }
+    var effectiveRate: Float { paused ? desiredRate : (player.rate > 0 ? player.rate : desiredRate) }
     func seek(to seconds: Double) {
         guard seconds.isFinite, seekable else { return }
         // VLCKit caches time notifications; paused inputs may not publish the

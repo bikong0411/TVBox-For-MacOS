@@ -18,6 +18,7 @@ import VLCKit
     @MainActor static func main() async {
         let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
         let controller = PlayerController()
+        let transport = PlaybackTransport(controller: controller)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 540), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         let host = VideoHostView(surface: controller.videoSurface)
@@ -31,9 +32,16 @@ import VLCKit
             try await wait("VLC did not become ready") { controller.ready || controller.error != nil }
             try require(controller.ready && !controller.systemPlayback && controller.nativeSession != nil, "Default playback did not use bundled VLC")
             try await wait("VLC clock did not advance") { controller.position > 3.2 && controller.duration > 25 }
-            controller.pause()
+            transport.refresh()
+            try require(transport.playing && transport.canSeek && transport.duration > 25, "Control bar did not show decoder state")
+            transport.setVolume(0.4); transport.toggleMute()
+            try require(controller.nativeSession?.player.audio?.volume == 40 && !controller.muted, "Control bar volume or mute did not reach VLC")
+            transport.setVolume(0); transport.toggleMute()
+            transport.togglePlayback(rate: 1)
             try await wait("VLC pause failed") { !controller.playing }
             controller.setRate(1.25)
+            transport.refresh()
+            try require(abs(transport.effectiveRate - 1.25) < 0.01 && !transport.playing, "Control bar rate/pause state incorrect")
             let paused = controller.position
             try await Task.sleep(nanoseconds: 300_000_000)
             try require(abs(controller.position - paused) < 0.2, "Paused VLC clock advanced")
@@ -76,6 +84,8 @@ import VLCKit
             try await wait("Returning to VLC failed") { controller.ready && !controller.systemPlayback }
             try await wait("Returning to VLC lost position") { abs(controller.position - 15) < 0.6 }
             try require(!controller.playing && controller.muted && controller.volume == 0, "Returning to VLC lost transport state")
+            try await Task.sleep(nanoseconds: 300_000_000)
+            try require(!controller.buffering, "Paused VLC incorrectly showed buffering")
             print("PASS: system AirPlay/PiP path and return to VLC preserve pause, position, rate and volume")
 
             for file in ["test.flv", "test.mkv", "test-mpeg2.ts"] {

@@ -38,12 +38,13 @@ struct SourcesView: View {
                         Button("关闭提示") { store.importNotice = nil }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(Theme.muted)
                     }
                 }
+                PlayerPreferenceView()
                 vodSection
                 liveSection
                 activeVODDetails
                 activeLiveDetails
                 compatibility
-                Text("TVBox for macOS · 0.7.1 · 内置 VLC · Intel / Apple Silicon").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                Text("TVBox for macOS · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版") · 内置 VLC · Intel / Apple Silicon").font(.system(size: 10)).foregroundStyle(Theme.muted)
             }.padding(32)
         }
         .confirmationDialog("移除这个源？收藏和播放记录会保留。", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {

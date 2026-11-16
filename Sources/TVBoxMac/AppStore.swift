@@ -73,37 +73,64 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     // The system player is reserved for AirPlay / PiP and custom HTTP headers.
     // Ordinary playback uses the independent VLC framework bundled in the app.
     let player = AVPlayer()
+    let dlna = DLNACastingController()
     private(set) var nativeSession: VLCPlaybackSession?
+    private(set) var mpvSession: MPVPlaybackSession?
+    var preferMPV = false
+    @Published private(set) var componentNotice: String?
+    var playbackEngine: String { systemPlayback ? "系统播放" : mpvSession != nil ? "IINA 组件 · mpv" : "内置 VLC" }
+    private var castTask: Task<Void, Never>?
+    private var pendingCastDevice: DLNADevice?
     @Published private(set) var systemPlayback = false
     private var nativeVolume: Double = 1
     private var nativeMuted = false
     private var clockTask: Task<Void, Never>?
     private var nativeSeekTask: Task<Void, Never>?
     private var pendingPiP = false
-    var position: Double { systemPlayback ? max(0, player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0) : (nativeSession?.position ?? 0) }
-    var duration: Double { let value = systemPlayback ? (player.currentItem?.duration.seconds ?? 0) : (nativeSession?.duration ?? 0); return value.isFinite && value > 0 ? value : 0 }
-    var playing: Bool { systemPlayback ? player.rate != 0 : (nativeSession?.playing ?? false) }
-    var volume: Double { systemPlayback ? Double(player.volume) : nativeVolume }
-    var muted: Bool { systemPlayback ? player.isMuted : nativeMuted }
-    var canUseVLCPlayback: Bool {
-        currentRequest?.headers.keys.allSatisfy { ["user-agent", "referer", "referrer"].contains($0.lowercased()) } ?? true
+    @Published private(set) var airPlayPreparing = false
+    @Published private(set) var airPlayMessage: String?
+    private var airPlayToken = UUID()
+    private var airPlayItemObservation: NSKeyValueObservation?
+    private var airPlayTimeout: Task<Void, Never>?
+    private var airPlayCandidate: AVPlayerItem?
+    private var routeObservation: NSKeyValueObservation?
+    var position: Double { if dlna.connected { return dlna.state.position }; return systemPlayback ? max(0, player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0) : (mpvSession?.position ?? nativeSession?.position ?? 0) }
+    var duration: Double { if dlna.connected { return dlna.state.duration }; let value = systemPlayback ? (player.currentItem?.duration.seconds ?? 0) : (mpvSession?.duration ?? nativeSession?.duration ?? 0); return value.isFinite && value > 0 ? value : 0 }
+    var playing: Bool { dlna.connected ? dlna.state.playing : systemPlayback ? player.rate != 0 : (mpvSession?.playing ?? nativeSession?.playing ?? false) }
+    var volume: Double { dlna.connected ? (dlna.state.volume ?? 0) : systemPlayback ? Double(player.volume) : nativeVolume }
+    var muted: Bool { dlna.connected ? (dlna.state.muted ?? false) : systemPlayback ? player.isMuted : nativeMuted }
+    var effectiveRate: Float { dlna.connected ? 1 : (systemPlayback ? rate : mpvSession?.effectiveRate ?? nativeSession?.effectiveRate ?? rate) }
+    var canSeek: Bool {
+        guard ready, !dlna.connecting, currentRequest?.isLive != true, duration > 0 else { return false }
+        return dlna.connected ? dlna.state.canSeek : systemPlayback ? true : (mpvSession?.seekable ?? nativeSession?.seekable ?? false)
     }
-    func setVolume(_ value: Double) { guard value.isFinite else { return }; nativeVolume = min(1, max(0, value)); player.volume = Float(nativeVolume); nativeSession?.setVolume(nativeVolume) }
-    func toggleMute() { nativeMuted = !muted; player.isMuted = nativeMuted; nativeSession?.setMuted(nativeMuted) }
-    func pause() { if systemPlayback { player.pause() } else { nativeSession?.pause() } }
+    var canPause: Bool { !dlna.connected || !dlna.state.playing || dlna.state.canPause }
+    var canVolume: Bool { !dlna.connected || dlna.state.canVolume }
+    var canMute: Bool { !dlna.connected || dlna.state.canMute }
+    var canUseVLCPlayback: Bool {
+        if preferMPV { return true }
+        return currentRequest?.headers.keys.allSatisfy { ["user-agent", "referer", "referrer"].contains($0.lowercased()) } ?? true
+    }
+    func setVolume(_ value: Double) { guard value.isFinite else { return }; if dlna.connected { dlna.setVolume(value); return }; nativeVolume = min(1, max(0, value)); player.volume = Float(nativeVolume); nativeSession?.setVolume(nativeVolume); mpvSession?.setVolume(nativeVolume) }
+    func toggleMute() { if dlna.connected { dlna.toggleMute(); return }; nativeMuted = !muted; player.isMuted = nativeMuted; nativeSession?.setMuted(nativeMuted); mpvSession?.setMuted(nativeMuted) }
+    func pause() { buffering = false; if dlna.connected { dlna.pause() } else if systemPlayback { player.pause() } else { nativeSession?.pause(); mpvSession?.pause() } }
     func togglePlayback() {
+        guard !dlna.connecting else { return }
+        if dlna.connected { dlna.togglePlayback(); return }
         if playing { pause() }
         else if systemPlayback { if duration > 0 && position >= duration - 0.1 { seek(to: 0) }; player.playImmediately(atRate: rate) }
-        else { if duration > 0 && position >= duration - 0.1 { seek(to: 0) }; nativeSession?.play() }
+        else { if mpvSession?.reachedEnd == true || (duration > 0 && position >= duration - 0.1) { seek(to: 0) }; nativeSession?.play(); mpvSession?.play() }
     }
     func seek(to seconds: Double) {
-        guard ready, seconds.isFinite, duration > 0 else { return }
+        guard canSeek, seconds.isFinite else { return }
         nativeSeekTask?.cancel(); pendingKeyboardSeek = nil
         let target = min(max(0, seconds), duration)
-        if systemPlayback { player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
-        else { nativeSession?.seek(to: target) }
+        if dlna.connected { dlna.seek(to: target) }
+        else if systemPlayback { player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+        else { nativeSession?.seek(to: target); mpvSession?.seek(to: target) }
     }
     func useSystemPlayback() {
+        if dlna.selectedDevice != nil { returnToLocal(); }
         guard !systemPlayback, let request = currentRequest else { return }
         let resume = position, paused = ready && !playing
         nativeVolume = volume; nativeMuted = muted
@@ -111,15 +138,78 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         videoSurface.setSystemPlayback(true)
         begin(request.episode, headers: request.headers, position: request.isLive ? 0 : resume, isLive: request.isLive, resumePaused: paused)
     }
+    /// Opening the cast popover or changing tabs never calls this method.
+    /// Preparing the system route leaves the current decoder and line intact.
+    func prepareAirPlayRoute() {
+        guard !systemPlayback, ready, let request = currentRequest, airPlayCandidate == nil else { return }
+        cancelAirPlayPreparation(); let token = UUID(); airPlayToken = token
+        airPlayPreparing = true; airPlayMessage = "正在准备 AirPlay，当前视频继续播放…"
+        guard let url = URL(string: request.episode.url), ["http", "https", "file"].contains(url.scheme ?? "") else {
+            airPlayPreparing = false; airPlayMessage = "此片源不支持 AirPlay 直投，可使用 DLNA。"; return
+        }
+        let item = AVPlayerItem(asset: AVURLAsset(url: url, options: request.headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": request.headers]))
+        airPlayCandidate = item; player.pause(); player.volume = Float(nativeVolume); player.isMuted = nativeMuted
+        airPlayItemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self, self.airPlayToken == token, self.player.currentItem === item else { return }
+                if item.status == .readyToPlay {
+                    self.airPlayMessage = "请选择 AirPlay 设备；取消选择不会打断当前播放。"
+                    self.commitAirPlayRouteIfNeeded()
+                } else if item.status == .failed {
+                    self.cancelAirPlayPreparation()
+                    self.airPlayMessage = "此片源暂时无法通过 AirPlay 播放，当前视频继续播放。可尝试 DLNA 或屏幕镜像。"
+                }
+            }
+        }
+        player.replaceCurrentItem(with: item)
+        airPlayTimeout = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 30_000_000_000) } catch { return }
+            guard let self, self.airPlayToken == token, !self.systemPlayback else { return }
+            self.cancelAirPlayPreparation()
+        }
+    }
+    func cancelAirPlayPreparation() {
+        airPlayToken = UUID(); airPlayTimeout?.cancel(); airPlayTimeout = nil
+        airPlayItemObservation = nil; airPlayCandidate = nil; airPlayPreparing = false; airPlayMessage = nil
+        if !systemPlayback { player.pause(); player.replaceCurrentItem(with: nil) }
+    }
+    private func commitAirPlayRouteIfNeeded() {
+        guard !systemPlayback, player.isExternalPlaybackActive, let item = airPlayCandidate, item.status == .readyToPlay else { return }
+        let token = airPlayToken, requestToken = generation
+        let resume = currentRequest?.isLive == true ? 0 : position, paused = !playing
+        let finish: () -> Void = { [weak self, weak item] in
+            guard let self, let item, self.airPlayToken == token, self.generation == requestToken, self.player.currentItem === item, self.airPlayCandidate === item else { return }
+            self.nativeSession?.pause(); self.mpvSession?.pause()
+            self.systemPlayback = true; self.videoSurface.setSystemPlayback(true)
+            self.airPlayCandidate = nil; self.airPlayTimeout?.cancel(); self.airPlayTimeout = nil
+            self.airPlayPreparing = false; self.airPlayMessage = nil
+            if paused { self.player.pause() } else { self.player.playImmediately(atRate: self.rate) }
+            self.endToken = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+                Task { @MainActor in if self?.generation == requestToken { self?.onEnd?() } }
+            }
+        }
+        if resume > 0 {
+            player.seek(to: CMTime(seconds: resume, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in Task { @MainActor in finish() } }
+        } else { finish() }
+    }
     func useVLCPlayback() {
         guard systemPlayback, let request = currentRequest else { return }
         let resume = position, paused = ready && !playing
         nativeVolume = volume; nativeMuted = muted
+        if nativeSession != nil || mpvSession != nil {
+            stopPresentation(); player.pause(); clearAsset(); player.replaceCurrentItem(with: nil)
+            systemPlayback = false; videoSurface.setSystemPlayback(false); cancelAirPlayPreparation()
+            seek(to: request.isLive ? 0 : resume)
+            if !paused { nativeSession?.play(); mpvSession?.play() }
+            return
+        }
         stopPresentation(); clearAttempt(); systemPlayback = false
         videoSurface.setSystemPlayback(false)
         begin(request.episode, headers: request.headers, position: request.isLive ? 0 : resume, isLive: request.isLive, resumePaused: paused)
     }
     func togglePictureInPicture() {
+        guard dlna.selectedDevice == nil else { return }
+        guard videoSurface.pictureInPictureSupported else { videoSurface.pictureInPictureError = "此设备暂不支持系统画中画。"; return }
         if !systemPlayback { pendingPiP = true; useSystemPlayback() }
         else { videoSurface.togglePictureInPicture() }
     }
@@ -135,6 +225,8 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     @Published var rate: Float = 1
     @Published var usingCompatibility = false
     @Published var connectingMessage = "正在连接视频…"
+    @Published private(set) var connectionStartedAt = Date()
+    @Published private(set) var buffering = false
     var onProgress: ((Double) -> Void)?
     var onEnd: (() -> Void)?
     var onReady: (() -> Void)?
@@ -164,6 +256,10 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private var keyboardSeekGeneration = UUID()
     init() {
         player.allowsExternalPlayback = true
+        routeObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.commitAirPlayRouteIfNeeded() }
+        }
+        dlna.onEnd = { [weak self] in self?.onEnd?() }
         clockTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
@@ -172,13 +268,17 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         }
     }
     func play(_ episode: Episode, headers: [String: String], position: Double = 0, isLive: Bool = false) {
+        let cast = dlna.selectedDevice
         let keepSystemOutput = systemPlayback && (videoSurface.externalPlaybackActive || videoSurface.pictureInPictureActive)
         stop(); systemPlayback = keepSystemOutput; error = nil; failure = nil; ready = false
+        pendingCastDevice = cast
         begin(episode, headers: headers, position: position, isLive: isLive)
     }
     func playLive(_ episodes: [Episode], index: Int, headers: [String: String], onRoute: @escaping (Int) -> Void) {
+        let cast = dlna.selectedDevice
         let keepSystemOutput = systemPlayback && (videoSurface.externalPlaybackActive || videoSurface.pictureInPictureActive)
         stop(); systemPlayback = keepSystemOutput; error = nil; failure = nil
+        pendingCastDevice = cast
         livePlan = LiveRoutePlan(episodes: episodes, startingAt: index)
         liveHeaders = headers; onLiveRoute = onRoute
         if let next = livePlan?.next() { startLiveRoute(next) }
@@ -197,11 +297,17 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private func begin(_ episode: Episode, headers: [String: String], position: Double = 0, isLive: Bool, retryingTLS: Bool = false, resumePaused: Bool = false) {
         currentRequest = PlaybackRequest(episode: episode, headers: headers, position: position, isLive: isLive)
         tlsRetryAttempted = retryingTLS
-        guard let url = URL(string: episode.url), ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") else {
+        guard let url = URL(string: episode.url), ["http", "https", "file", "rtsp", "rtmp"].contains(url.scheme?.lowercased() ?? "") else {
             finishFailure(PlaybackFailure(error: URLError(.unsupportedURL))); return
         }
         let token = UUID(); generation = token
-        connectingMessage = connectionText("正在连接视频…")
+        connectionStartedAt = Date()
+        connectingMessage = connectionText(retryingTLS ? "正在重新连接片源…" : "正在连接片源…")
+        componentNotice = nil
+        if !systemPlayback && preferMPV {
+            do { try loadMPV(url, headers: headers, position: position, token: token, resumePaused: resumePaused); return }
+            catch { componentNotice = "IINA 播放组件不可用，已回退内置 VLC。" }
+        }
         if !systemPlayback {
             let supported = Set(["user-agent", "referer", "referrer"])
             if headers.keys.contains(where: { !supported.contains($0.lowercased()) }) { systemPlayback = true }
@@ -216,14 +322,22 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         loadAsset(url, headers: headers, position: position, token: token, fallback: isLive ? episode : nil, resumePaused: resumePaused)
     }
     private func loadVLC(_ url: URL, headers: [String: String], position: Double, token: UUID, resumePaused: Bool) {
-        connectingMessage = connectionText("正在通过内置 VLC 连接视频…")
+        connectingMessage = connectionText(tlsRetryAttempted ? "正在重新连接片源…" : "正在连接片源…")
         let session = VLCPlaybackSession(url: url, headers: headers, drawable: videoSurface.view.prepareVLCView(), position: position, paused: resumePaused, rate: rate, volume: nativeVolume, muted: nativeMuted)
         nativeSession = session
         session.onState = { [weak self, weak session] state in
             guard let self, let session, self.generation == token, self.nativeSession === session else { return }
             switch state {
+            case .opening:
+                if !self.ready { self.connectingMessage = self.connectionText("正在等待片源响应…") }
+            case .buffering:
+                self.buffering = self.ready && session.playing
+                if !self.ready { self.connectingMessage = self.connectionText("正在准备视频画面…") }
             case .playing, .esAdded:
+                self.buffering = false
                 self.markNativeReady(session)
+            case .paused:
+                self.buffering = false
             case .error:
                 self.handleNativeFailure(token: token)
             case .ended:
@@ -245,13 +359,38 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         }
         session.start()
     }
+    private func loadMPV(_ url: URL, headers: [String: String], position: Double, token: UUID, resumePaused: Bool) throws {
+        let session = try MPVPlaybackSession(url: url, headers: headers, position: position, paused: resumePaused, rate: rate, volume: nativeVolume, muted: nativeMuted)
+        mpvSession = session; videoSurface.view.setMPVView(session.renderingView)
+        var deliveredEnd = false
+        session.onUpdate = { [weak self, weak session] state in
+            guard let self, let session, self.generation == token, self.mpvSession === session else { return }
+            if state.failure < 0 { self.handleNativeFailure(token: token); return }
+            let buffering = self.ready && state.buffering && !state.paused
+            if self.buffering != buffering { self.buffering = buffering }
+            if state.ready && !self.ready {
+                self.ready = true; self.connectionTimeout?.cancel(); self.connectionTimeout = nil; self.becameReady()
+            }
+            if !state.ended { deliveredEnd = false }
+            if state.ended && self.ready && !deliveredEnd {
+                deliveredEnd = true
+                if self.currentRequest?.isLive == true { self.handleNativeFailure(token: token) } else { self.onEnd?() }
+            }
+        }
+        connectionTimeout = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
+            guard let self, self.generation == token, !self.ready else { return }
+            self.handleNativeFailure(token: token, error: URLError(.timedOut))
+        }
+        session.start()
+    }
     private func markNativeReady(_ session: VLCPlaybackSession) {
         // VLC can enter Playing for an HTML/playlist response without opening
         // a decoder. A real audio or video track is required before hiding the
         // connection state and cancelling its timeout.
         guard !ready, nativeSession === session,
               session.player.hasVideoOut || session.player.numberOfAudioTracks > 0 else { return }
-        ready = true; connectionTimeout?.cancel(); connectionTimeout = nil; onReady?()
+        ready = true; connectionTimeout?.cancel(); connectionTimeout = nil; becameReady()
     }
     private func handleNativeFailure(token: UUID, error: Error? = nil) {
         guard generation == token, let request = currentRequest else { return }
@@ -260,7 +399,8 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         if !tlsRetryAttempted {
             let resume = ready ? position : request.position, paused = ready && !playing
             clearAttempt(); tlsRetryAttempted = true
-            connectingMessage = connectionText("连接未成功，正在自动重试（1/1）…")
+            connectionStartedAt = Date()
+            connectingMessage = connectionText("连接暂未成功，正在自动重试（1/1）…")
             let retryToken = generation
             tlsRetryTask = Task { @MainActor [weak self] in
                 do { try await Task.sleep(nanoseconds: 700_000_000) } catch { return }
@@ -292,7 +432,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                         guard let self, self.generation == token, self.player.currentItem === item else { return }
                         self.ready = true
                         if resumePaused { self.player.pause() } else { self.player.playImmediately(atRate: self.rate) }
-                        self.onReady?()
+                        self.becameReady()
                         if self.pendingPiP { self.pendingPiP = false; self.videoSurface.requestPictureInPicture() }
                     }
                     if position.isFinite && position > 0 {
@@ -396,15 +536,53 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         if let endToken { NotificationCenter.default.removeObserver(endToken) }; endToken = nil
         if let failToken { NotificationCenter.default.removeObserver(failToken) }; failToken = nil
     }
+    private func becameReady() {
+        onReady?()
+        if let device = pendingCastDevice { pendingCastDevice = nil; cast(to: device) }
+    }
+    func cast(to device: DLNADevice) {
+        guard ready, let request = currentRequest, let url = URL(string: request.episode.url), !videoSurface.externalPlaybackActive else { return }
+        cancelAirPlayPreparation()
+        let previous = castTask; previous?.cancel()
+        let resume = position, paused = !playing, token = generation
+        castTask = Task { [weak self] in
+            await previous?.value
+            guard let self, self.generation == token, !Task.isCancelled else { return }
+            do {
+                try await self.dlna.connect(to: device, source: url, headers: request.headers, title: request.episode.name,
+                                            position: request.isLive ? 0 : resume, paused: paused, isLive: request.isLive)
+                guard self.generation == token, !Task.isCancelled else { return }
+                // Only mute the local decoder after the television confirms playback.
+                self.player.pause(); self.nativeSession?.pause(); self.mpvSession?.pause()
+            } catch {}
+        }
+    }
+    func returnToLocal() {
+        guard dlna.selectedDevice != nil else { return }
+        let remote = dlna.hasPlayed ? dlna.state : nil
+        castTask?.cancel(); castTask = nil; pendingCastDevice = nil; dlna.disconnect()
+        guard let request = currentRequest else { return }
+        if request.isLive, remote != nil {
+            clearAttempt(); begin(request.episode, headers: request.headers, isLive: true)
+        } else if let remote {
+            seek(to: remote.position)
+            if remote.playing { if systemPlayback { player.playImmediately(atRate: rate) } else { nativeSession?.play(); mpvSession?.play() } }
+            else { if systemPlayback { player.pause() } else { nativeSession?.pause(); mpvSession?.pause() } }
+        }
+    }
     func stop() {
+        dlna.stopSearch()
+        castTask?.cancel(); castTask = nil; pendingCastDevice = nil; dlna.disconnect()
         livePlan = nil; liveHeaders = [:]; onLiveRoute = nil
         pendingPiP = false
         clearAttempt()
         systemPlayback = false; storedVideoSurface?.setSystemPlayback(false)
     }
     private func clearAttempt() {
+        cancelAirPlayPreparation()
+        buffering = false
         nativeSeekTask?.cancel(); nativeSeekTask = nil
-        nativeSession?.stop(); nativeSession = nil
+        nativeSession?.stop(); nativeSession = nil; mpvSession?.stop(); mpvSession = nil; storedVideoSurface?.view.setMPVView(nil)
         pendingKeyboardSeek = nil; keyboardSeekGeneration = UUID()
         generation = UUID(); compatibilityTask?.cancel(); compatibilityTask = nil
         tlsRetryTask?.cancel(); tlsRetryTask = nil; currentRequest = nil; tlsRetryAttempted = false
@@ -415,9 +593,9 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         player.pause(); clearAsset()
         player.replaceCurrentItem(with: nil); ready = false
     }
-    func setRate(_ value: Float) { rate = value; if systemPlayback { if player.rate != 0 { player.rate = value } } else { nativeSession?.setRate(value) } }
+    func setRate(_ value: Float) { guard value.isFinite, value > 0, value <= 4, !dlna.connected else { return }; rate = value; if systemPlayback { if player.rate != 0 { player.rate = value } } else { nativeSession?.setRate(value); mpvSession?.setRate(value) } }
     @discardableResult func seekRelative(by seconds: Double) -> Bool {
-        guard ready, livePlan == nil, currentRequest?.isLive != true, seconds.isFinite, duration > 0 else { return false }
+        guard canSeek, livePlan == nil, seconds.isFinite else { return false }
         let target = min(max(0, (pendingKeyboardSeek ?? position) + seconds), duration)
         pendingKeyboardSeek = target
         nativeSeekTask?.cancel()
@@ -430,6 +608,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         return true
     }
     deinit {
+        castTask?.cancel()
         clockTask?.cancel(); nativeSeekTask?.cancel()
         if let timeToken { player.removeTimeObserver(timeToken) }
         if let endToken { NotificationCenter.default.removeObserver(endToken) }
@@ -466,6 +645,9 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     @Published var liveLoading = false
     @Published var liveError: String?
     @Published var playback: Playback?
+    @Published var playbackPreference: PlaybackPreference {
+        didSet { defaults.set(playbackPreference.rawValue, forKey: "playback.preference.v1") }
+    }
     let player = PlayerController()
     let fullscreen: PlaybackFullscreenPresenter
     let service = TVService()
@@ -505,6 +687,8 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         } else {
             defaults = .standard
         }
+        playbackPreference = PlaybackPreference(rawValue: defaults.string(forKey: "playback.preference.v1") ?? "")
+            ?? (ProcessInfo.processInfo.arguments.contains("--ui-test") ? .builtIn : .preferIINA)
         liveBrowser = LiveBrowserState(defaults: defaults)
         preferenceWriter = PreferenceWriter(defaults: defaults)
         var needsLibrarySave = false
@@ -767,9 +951,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         guard line.episodes.indices.contains(index) else { return }
         saveCurrentPosition(); playback = Playback(video: video, site: site, line: line, index: index, headers: headers ?? site?.headers ?? [:], isLive: live)
         detail = nil
-        if live {
-            player.playLive(line.episodes, index: index, headers: headers ?? site?.headers ?? [:]) { [weak self] route in self?.playback?.index = route }
-        } else { player.play(line.episodes[index], headers: headers ?? site?.headers ?? [:], position: position) }
+        startPlayback(position: position)
         if !live {
             var item = LibraryEntry(video: video, site: site, episode: line.episodes[index], position: position)
             item.updated = Date(); history.removeAll { $0.id == item.id }; history.insert(item, at: 0); history = Array(history.prefix(100)); save(history, key: "history")
@@ -790,13 +972,35 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         playback = Playback(video: Video(id: channel.id, title: channel.name, note: "节目回看"), site: nil, line: line, index: 0, headers: channel.headers, isLive: true, catchupProgramme: programme)
         detail = nil
         // A finite catch-up item must not trigger live route retries or history writes.
-        player.play(line.episodes[0], headers: channel.headers)
+        startPlayback(position: 0)
+    }
+    private func startInternalPlayback(position: Double) {
+        guard let current = playback else { return }
+        player.preferMPV = playbackPreference == .preferIINA
+        if current.isLive && current.catchupProgramme == nil {
+            player.playLive(current.line.episodes, index: current.index, headers: current.headers) { [weak self] route in self?.playback?.index = route }
+        } else { player.play(current.episode, headers: current.headers, position: position) }
+    }
+    private func startPlayback(position: Double) {
+        startInternalPlayback(position: position)
+    }
+    func useBuiltInPlayback() {
+        guard playback != nil else { return }
+        let position = player.position
+        playbackPreference = .builtIn; startPlayback(position: position)
+    }
+    func useIINAPlayback() {
+        guard playback != nil else { return }
+        guard MPVLibrary.componentURL != nil else { alert = "没有找到 IINA 的播放组件，当前继续使用内置 VLC。"; return }
+        let position = player.position
+        saveCurrentPosition(); playbackPreference = .preferIINA
+        startPlayback(position: position)
     }
     func retryPlayback() {
         guard let current = playback else { return }
         if let programme = current.catchupProgramme, let channel = playingChannel { playCatchup(programme, channel: channel); return }
         if current.isLive { play(video: current.video, site: current.site, line: current.line, index: current.index, headers: current.headers, live: true) }
-        else { player.play(current.episode, headers: current.headers) }
+        else { startPlayback(position: 0) }
     }
     func nextLiveRoute() {
         guard let current = playback, current.isLive, current.line.episodes.count > 1 else { return }

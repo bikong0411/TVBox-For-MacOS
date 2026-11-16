@@ -23,6 +23,7 @@ for ARCH in "${ARCHES[@]}"; do HELPERS+=("$PROJECT_DIR/.build/remux-$ARCH/tvbox-
 lipo -create "${HELPERS[@]}" -output "$APP_DIR/Contents/Helpers/tvbox-remux"
 cp "$PROJECT_DIR/.build/remux-${ARCHES[0]}/COPYING.LGPLv2.1" "$APP_DIR/Contents/Resources/FFmpeg-LICENSE.txt"
 cp "$PROJECT_DIR/Resources/VLCKit-LICENSE.txt" "$APP_DIR/Contents/Resources/VLCKit-LICENSE.txt"
+cp "$PROJECT_DIR/Sources/MPVBridge/MPV-API-LICENSE.txt" "$APP_DIR/Contents/Resources/MPV-API-LICENSE.txt"
 cp "$PROJECT_DIR/ThirdPartySources/README.md" "$APP_DIR/Contents/Resources/ThirdParty-Notices.md"
 ditto "$PROJECT_DIR/Vendor/VLCKit.xcframework/macos-arm64_x86_64/VLCKit.framework" "$APP_DIR/Contents/Frameworks/VLCKit.framework"
 lipo -create "${BINS[@]}" -output "$APP_DIR/Contents/MacOS/TVBoxMac"

@@ -8,7 +8,8 @@ let package = Package(
     targets: [
         .binaryTarget(name: "VLCKit", path: "Vendor/VLCKit.xcframework"),
         .target(name: "TVBoxCore"),
-        .executableTarget(name: "TVBoxMac", dependencies: ["TVBoxCore", "VLCKit"],
+        .target(name: "MPVBridge", exclude: ["MPV-API-LICENSE.txt"], publicHeadersPath: "include"),
+        .executableTarget(name: "TVBoxMac", dependencies: ["TVBoxCore", "VLCKit", "MPVBridge"],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "TVBoxCoreTests", dependencies: ["TVBoxCore"])
     ],

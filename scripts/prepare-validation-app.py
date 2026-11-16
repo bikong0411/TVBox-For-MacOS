@@ -14,7 +14,7 @@ if destination.exists(): shutil.rmtree(destination)
 shutil.copytree(release, destination, symlinks=True)
 info_path = destination / "Contents/Info.plist"
 info = plistlib.loads(info_path.read_bytes())
-info["CFBundleIdentifier"] = "local.tvboxmac.validation.sources.071" + (".intel" if intel else "")
+info["CFBundleIdentifier"] = "local.tvboxmac.validation.component.082" + (".intel" if intel else "")
 info["CFBundleDisplayName"] = "TVBox 验证"
 info["CFBundleName"] = "TVBox 验证"
 info_path.write_bytes(plistlib.dumps(info))
