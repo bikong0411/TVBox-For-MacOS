@@ -3,7 +3,9 @@ import Darwin
 
 public enum LANIPv4 {
     public static func isLocal(_ host: String) -> Bool {
-        let parts = host.split(separator: ".").compactMap { UInt8($0) }
+        let fields = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard fields.count == 4, fields.allSatisfy({ !$0.isEmpty && $0.allSatisfy({ $0 >= "0" && $0 <= "9" }) }) else { return false }
+        let parts = fields.compactMap { UInt8($0) }
         guard parts.count == 4 else { return false }
         return parts[0] == 10 || parts[0] == 127 || (parts[0] == 192 && parts[1] == 168)
             || (parts[0] == 172 && (16...31).contains(parts[1])) || (parts[0] == 169 && parts[1] == 254)

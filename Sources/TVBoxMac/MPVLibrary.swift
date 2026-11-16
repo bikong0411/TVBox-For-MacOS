@@ -5,7 +5,6 @@ import TVBoxCore
 
 /// Reuse the installed playback library, never the IINA application process.
 @MainActor enum MPVLibrary {
-    private static var dependencies: [UnsafeMutableRawPointer] = []
     private static var loaded = false
     static var componentURL: URL? {
         let apps = [NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.colliderli.iina"), URL(fileURLWithPath: "/Applications/IINA.app"), FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/IINA.app")]
@@ -13,9 +12,30 @@ import TVBoxCore
             .map { $0.appendingPathComponent("Contents/Frameworks/libmpv.2.dylib") }
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
-    static func load() throws {
+    static func load() async throws {
         if loaded { return }
         guard let path = componentURL else { throw TVError.message("没有找到 IINA 的播放组件，将使用内置 VLC。") }
+        try await MPVLibraryLoader.load(path)
+        loaded = true
+    }
+}
+
+/// dlopen can be expensive on a cold filesystem. Serialize it away from AppKit;
+/// the main-actor fast path is published only after every C symbol is resolved.
+private enum MPVLibraryLoader {
+    private static let queue = DispatchQueue(label: "TVBox.mpv.library", qos: .userInitiated)
+    private static var dependencies: [UnsafeMutableRawPointer] = []
+    private static var loaded = false
+    static func load(_ path: URL) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async {
+                do { try loadOnQueue(path); continuation.resume() }
+                catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+    private static func loadOnQueue(_ path: URL) throws {
+        if loaded { return }
         var pending = (try? FileManager.default.contentsOfDirectory(at: path.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? []
         // IINA normally supplies @rpath. Resolve sibling media dependencies
         // without changing either app or loading a second Swift runtime.

@@ -14,8 +14,17 @@ struct DLNAPlaybackState: Equatable {
     var canMute = false
 }
 
+@MainActor private final class CastConnectionCompletion {
+    private var finished = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async { if finished { return }; await withCheckedContinuation { waiters.append($0) } }
+    func finish() { finished = true; let pending = waiters; waiters.removeAll(); pending.forEach { $0.resume() } }
+}
+
 @MainActor final class DLNACastingController: ObservableObject {
     @Published private(set) var devices: [DLNADevice] = []
+    @Published private(set) var airPlayDevices: [DLNADevice] = []
+    @Published private(set) var airPlaySearching = false
     @Published private(set) var searching = false
     @Published private(set) var selectedDevice: DLNADevice?
     @Published private(set) var connecting = false
@@ -27,6 +36,7 @@ struct DLNAPlaybackState: Equatable {
     var onEnd: (() -> Void)?
     private let client: DLNAClient
     private let discovery = DLNADiscovery()
+    private let airPlayDiscovery = AirPlayVideoDiscovery()
     private var searchGeneration = UUID()
     private var searchTasks: [URL: Task<Void, Never>] = [:]
     private var udpFinished = false
@@ -43,9 +53,11 @@ struct DLNAPlaybackState: Equatable {
     private var rejectedActions: Set<String> = []
     private(set) var hasPlayed = false
     private var stateRevision = 0
+    private var airPlayPauseRequested = false
+    private var connectionCompletion: CastConnectionCompletion?
     init(client: DLNAClient = DLNAClient()) { self.client = client }
     func search() {
-        stopSearch(); devices = selectedDevice.map { [$0] } ?? []
+        stopSearch(); devices = selectedDevice.flatMap { $0.isAirPlayVideo ? nil : [$0] } ?? []
         searching = true; udpFinished = false; let token = UUID(); searchGeneration = token
         discovery.search(onLocation: { [weak self] url in
             Task { @MainActor in
@@ -72,13 +84,26 @@ struct DLNAPlaybackState: Equatable {
     func stopSearch() {
         searchGeneration = UUID(); discovery.stop(); searchTasks.values.forEach { $0.cancel() }
         searchTasks.removeAll(); searching = false
+        airPlayDiscovery.stop(); airPlaySearching = false
+    }
+    func searchAirPlay() {
+        airPlayDiscovery.stop(); airPlaySearching = true
+        airPlayDevices = selectedDevice.flatMap { $0.isAirPlayVideo ? [$0] : nil } ?? []
+        airPlayDiscovery.search(found: { [weak self] device in
+            guard let self else { return }
+            self.airPlayDevices.removeAll { $0.id == device.id }; self.airPlayDevices.append(device)
+            self.airPlayDevices.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }, finished: { [weak self] in self?.airPlaySearching = false })
     }
     func connect(to device: DLNADevice, source: URL, headers: [String: String], title: String,
                  position: Double, paused: Bool, isLive: Bool) async throws {
         let previous = disconnect()
+        let completion = CastConnectionCompletion(); connectionCompletion = completion
+        defer { completion.finish(); if connectionCompletion === completion { connectionCompletion = nil } }
         let token = UUID(); generation = token; selectedDevice = device
         connecting = true; connected = false; live = isLive; ended = false; error = nil
         rejectedActions = []; hasPlayed = false
+        airPlayPauseRequested = paused
         status = "正在连接电视…"
         var localRelay: CastMediaRelay?
         do {
@@ -98,15 +123,20 @@ struct DLNAPlaybackState: Equatable {
             localRelay = relay; self.relay = relay
             let address = try await relay.start(); try check(token)
             status = "正在发送视频到电视…"
-            let metadata = DLNAProtocol.metadata(title: title, mediaURL: address, mime: CastMediaRelay.mime(source))
-            do {
-                try await client.action("SetAVTransportURI", service: device.transport, arguments: [("CurrentURI", address.absoluteString), ("CurrentURIMetaData", metadata)])
-            } catch is DLNAFault {
-                // Some older renderers accept the URI only with empty DIDL.
-                try await client.action("SetAVTransportURI", service: device.transport, arguments: [("CurrentURI", address.absoluteString), ("CurrentURIMetaData", "")])
+            if device.isAirPlayVideo {
+                try await client.playAirPlayVideo(address, on: device)
+            } else {
+                let metadata = DLNAProtocol.metadata(title: title, mediaURL: address, mime: CastMediaRelay.mime(source))
+                do {
+                    try await client.action("SetAVTransportURI", service: device.transport, arguments: [("CurrentURI", address.absoluteString), ("CurrentURIMetaData", metadata)])
+                } catch is DLNAFault {
+                    // Some older renderers accept the URI only with empty DIDL.
+                    try await client.action("SetAVTransportURI", service: device.transport, arguments: [("CurrentURI", address.absoluteString), ("CurrentURIMetaData", "")])
+                }
+                try check(token)
+                try await client.action("Play", service: device.transport, arguments: [("Speed", "1")])
             }
             try check(token)
-            try await client.action("Play", service: device.transport, arguments: [("Speed", "1")])
             status = "正在等待电视开始播放…"
             let deadline = Date().addingTimeInterval(20)
             while Date() < deadline {
@@ -170,7 +200,8 @@ struct DLNAPlaybackState: Equatable {
         next.canPause = device.transport.actions.contains("Pause") && !rejectedActions.contains("Pause")
         next.canSeek = !live && device.transport.actions.contains("Seek") && !rejectedActions.contains("Seek")
         if let values = try? await client.action("GetPositionInfo", service: device.transport) {
-            next.position = DLNAProtocol.seconds(values["RelTime"]); next.duration = DLNAProtocol.seconds(values["TrackDuration"])
+            if let time = values["RelTime"] { next.position = DLNAProtocol.seconds(time) }
+            if let duration = values["TrackDuration"] { next.duration = DLNAProtocol.seconds(duration) }
         }
         try check(token)
         if let rendering = device.rendering {
@@ -191,7 +222,8 @@ struct DLNAPlaybackState: Equatable {
         next.canVolume = next.canVolume && !rejectedActions.contains("SetVolume")
         next.canMute = next.canMute && !rejectedActions.contains("SetMute")
         state = next; status = actions
-        if mode == "STOPPED", !ended, next.duration > 0, next.position >= next.duration - 1 {
+        let airPlayEnd = device.isAirPlayVideo && !airPlayPauseRequested && !live && !next.playing && next.position >= next.duration - 1
+        if (mode == "STOPPED" || airPlayEnd), !ended, next.duration > 0, next.position >= next.duration - 1 {
             ended = true; onEnd?()
         }
     }
@@ -238,6 +270,8 @@ struct DLNAPlaybackState: Equatable {
             do {
                 try self.check(token)
                 try await self.client.action(action, service: service, arguments: arguments)
+                if device.isAirPlayVideo, action == "Pause" { self.airPlayPauseRequested = true }
+                if device.isAirPlayVideo, action == "Play" { self.airPlayPauseRequested = false }
                 try await self.refresh(device, token: token); self.error = nil
             } catch {
                 guard self.generation == token, !Task.isCancelled else { return }
@@ -256,15 +290,19 @@ struct DLNAPlaybackState: Equatable {
         }
     }
     @discardableResult func disconnect() -> Task<Void, Never> {
-        let old = selectedDevice, previous = commandTail
+        let old = selectedDevice, previous = commandTail, starting = connectionCompletion
         // Keep the command chain alive until its final Stop is acknowledged.
         // Generation checks discard queued controls; cancelling this tail could
         // otherwise cancel the Stop itself when immediately casting again.
         generation = UUID(); pollTask?.cancel(); pollTask = nil
+        connectionCompletion = nil
         volumeTask?.cancel(); seekTask?.cancel(); selectedDevice = nil
         connected = false; connecting = false; controlsBusy = false; state = DLNAPlaybackState(); status = ""; error = nil
         releaseMedia()
-        let task = Task { [client] in await previous?.value; if let old { _ = try? await client.action("Stop", service: old.transport) } }
+        let task = Task { [client] in
+            await starting?.wait(); await previous?.value
+            if let old { _ = try? await client.action("Stop", service: old.transport) }
+        }
         commandTail = task; return task
     }
     private func releaseMedia() {
@@ -273,6 +311,6 @@ struct DLNAPlaybackState: Equatable {
     }
     private func friendly(_ error: Error) -> String {
         if error is DLNAFault || error is TVError { return error.localizedDescription }
-        return "暂时无法连接电视。请确认电视已开启 DLNA、与 Mac 连接同一网络，并允许本应用访问局域网。"
+        return "暂时无法连接电视。请确认电视已开启投屏、与 Mac 连接同一网络，并允许本应用访问局域网。"
     }
 }

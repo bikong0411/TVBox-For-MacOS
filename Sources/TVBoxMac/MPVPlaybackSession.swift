@@ -61,6 +61,8 @@ private final class MPVWorker: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var stopped = false
     private var ended = false
+    private var commandFailure: Int32 = 0
+    private var loaded = false
     var callback: (@Sendable (MPVSnapshot) -> Void)?
     init(core: OpaquePointer) { self.core = core }
     func start(url: URL) {
@@ -77,18 +79,22 @@ private final class MPVWorker: @unchecked Sendable {
         if arguments.first == "seek" { ended = false }
         let strings = arguments.map { strdup($0) }; defer { strings.forEach { free($0) } }
         let pointers: [UnsafePointer<CChar>?] = strings.map { $0.map { UnsafePointer<CChar>($0) } } + [nil]
-        pointers.withUnsafeBufferPointer { _ = tvmpv_command(core, $0.baseAddress) }
+        let result = pointers.withUnsafeBufferPointer { tvmpv_command(core, $0.baseAddress) }
+        if arguments.first == "loadfile", result < 0 { commandFailure = result }
     }
     func send(_ arguments: [String]) { queue.async { if !self.stopped { self.command(arguments) } } }
     func number(_ key: String, _ value: Double) { queue.async { if !self.stopped { _ = tvmpv_set_number(self.core, key, value) } } }
     func flag(_ key: String, _ value: Bool) { queue.async { if !self.stopped { _ = tvmpv_set_flag(self.core, key, value ? 1 : 0) } } }
     private func poll() {
         guard !stopped else { return }
-        var error: Int32 = 0, reason: Int32 = -1, failure: Int32 = 0
+        var error: Int32 = 0, reason: Int32 = -1, failure = commandFailure
+        commandFailure = 0
         for _ in 0..<64 {
             let event = tvmpv_event(core, &error, &reason)
             if event == 0 { break }
             if event == 7 && reason == 4 { failure = error }
+            if event == 8 { loaded = true }
+            if event == 5 && error < 0 && !loaded { failure = error }
             if event == 7 && reason == 0 { ended = true }
         }
         var s = MPVSnapshot()
@@ -106,21 +112,23 @@ private final class MPVWorker: @unchecked Sendable {
     }
 }
 
-@MainActor final class MPVPlaybackSession {
-    let renderingView: MPVRenderingView
-    var onUpdate: ((MPVSnapshot) -> Void)?
-    private let worker: MPVWorker
-    private let url: URL
-    private var active = true
-    private var snapshot = MPVSnapshot()
-    private var requestedPosition: (Double, Date)?
-    private var desiredPaused: Bool
-    init(url: URL, headers: [String: String], position: Double, paused: Bool, rate: Float, volume: Double, muted: Bool) throws {
-        try MPVLibrary.load()
+/// Own a newly initialized core across the background-to-main handoff. A
+/// cancelled request still destroys its core without blocking the UI thread.
+private final class MPVPreparedCore: @unchecked Sendable {
+    private(set) var core: OpaquePointer?
+    private static let cleanup = DispatchQueue(label: "TVBox.mpv.bootstrap-cleanup", qos: .utility)
+    private init(_ core: OpaquePointer) { self.core = core }
+    func take() -> OpaquePointer { let value = core!; core = nil; return value }
+    deinit { if let core { Self.cleanup.async { tvmpv_destroy(core) } } }
+    static func prepare(url: URL, headers: [String: String], position: Double, paused: Bool, rate: Float, volume: Double, muted: Bool) throws -> MPVPreparedCore {
         guard let core = tvmpv_create() else { throw TVError.message("无法启动 IINA 播放组件。") }
         var initialized = false
         defer { if !initialized { tvmpv_destroy(core) } }
-        for (key, value) in ["config": "no", "load-scripts": "no", "terminal": "no", "msg-level": "all=no", "vo": "libmpv", "hwdec": "auto-safe", "vd-lavc-dr": "no", "input-default-bindings": "no", "input-vo-keyboard": "no", "osc": "no", "ytdl": "no", "keep-open": "yes", "video-timing-offset": "0", "resume-playback": "no"] { _ = tvmpv_option(core, key, value) }
+        for (key, value) in ["config": "no", "load-scripts": "no", "terminal": "no", "msg-level": "all=no", "vo": "libmpv", "hwdec": "auto-safe", "vd-lavc-dr": "no", "input-default-bindings": "no", "input-vo-keyboard": "no", "osc": "no", "ytdl": "no", "keep-open": "yes", "video-timing-offset": "0", "resume-playback": "no", "network-timeout": "10"] { _ = tvmpv_option(core, key, value) }
+        if ["127.0.0.1", "localhost", "::1"].contains(url.host?.lowercased() ?? "") {
+            // A shell proxy must never intercept our private loopback relay.
+            _ = tvmpv_option(core, "stream-lavf-o", "http_proxy=")
+        }
         guard headers.allSatisfy({ $0.key.rangeOfCharacter(from: .newlines) == nil && $0.value.rangeOfCharacter(from: .newlines) == nil }) else { throw TVError.message("片源请求头格式不正确。") }
         let sorted = headers.sorted { $0.key < $1.key }
         let names = sorted.map { strdup($0.key) }, values = sorted.map { strdup($0.value) }
@@ -133,10 +141,35 @@ private final class MPVWorker: @unchecked Sendable {
         _ = tvmpv_option(core, "pause", paused ? "yes" : "no"); _ = tvmpv_option(core, "speed", String(rate))
         _ = tvmpv_option(core, "volume", String(min(100, max(0, volume * 100)))); _ = tvmpv_option(core, "mute", muted ? "yes" : "no")
         guard tvmpv_initialize(core) >= 0 else { throw TVError.message("IINA 播放组件初始化失败。") }
+        initialized = true
+        return MPVPreparedCore(core)
+    }
+}
+
+@MainActor final class MPVPlaybackSession {
+    let renderingView: MPVRenderingView
+    var onUpdate: ((MPVSnapshot) -> Void)?
+    private let worker: MPVWorker
+    private let url: URL
+    private var active = true
+    private var snapshot = MPVSnapshot()
+    private var requestedPosition: (Double, Date)?
+    private var desiredPaused: Bool
+    static func make(url: URL, headers: [String: String], position: Double, paused: Bool, rate: Float, volume: Double, muted: Bool) async throws -> MPVPlaybackSession {
+        try await MPVLibrary.load()
+        try Task.checkCancellation()
+        let prepared = try await Task.detached(priority: .userInitiated) {
+            try MPVPreparedCore.prepare(url: url, headers: headers, position: position, paused: paused, rate: rate, volume: volume, muted: muted)
+        }.value
+        try Task.checkCancellation()
+        return try MPVPlaybackSession(prepared: prepared, url: url, paused: paused, rate: rate)
+    }
+    private init(prepared: MPVPreparedCore, url: URL, paused: Bool, rate: Float) throws {
+        let core = prepared.core!
         guard let view = try MPVRenderingView(core: core) else { throw TVError.message("无法创建内嵌视频视图。") }
         renderingView = view
-        worker = MPVWorker(core: core); self.url = url; desiredPaused = paused
-        snapshot.rate = rate; snapshot.paused = paused; initialized = true
+        worker = MPVWorker(core: prepared.take()); self.url = url; desiredPaused = paused
+        snapshot.rate = rate; snapshot.paused = paused
         worker.callback = { [weak self] value in
             Task { @MainActor in
                 guard let self, self.active else { return }; self.snapshot = value

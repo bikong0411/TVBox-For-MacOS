@@ -12,10 +12,46 @@ from datetime import datetime, timedelta, timezone
 ROOT = Path(__file__).resolve().parent.parent
 
 class Handler(SimpleHTTPRequestHandler):
+    mpv_network_counts = {"direct": 0, "playlist": 0, "segment": 0, "direct_only": 0, "relay_rejected": 0}
     def do_GET(self):
         request = urlparse(self.path)
         query = parse_qs(request.query)
         address = f"http://127.0.0.1:{self.server.server_port}"
+        if request.path == "/mpv-network/stats":
+            return self.send_json(Handler.mpv_network_counts)
+        if request.path.startswith("/mpv-network/"):
+            if self.headers.get("X-MPV-Network") != "preserved":
+                self.send_error(403); return
+            direct = self.headers.get("User-Agent", "").lower().startswith(("libmpv", "mpv/"))
+            if request.path == "/mpv-network/direct-only.ts":
+                return self.send_bytes((ROOT / ".build/test-mpeg2.ts").read_bytes(), "video/mp2t")
+            if request.path == "/mpv-network/direct-only.m3u8":
+                if not direct:
+                    Handler.mpv_network_counts["relay_rejected"] += 1
+                    self.send_error(403); return
+                Handler.mpv_network_counts["direct_only"] += 1
+                return self.send_bytes(b"#EXTM3U\n#EXT-X-TARGETDURATION:16\n#EXTINF:15,\ndirect-only.ts\n#EXT-X-ENDLIST\n", "application/vnd.apple.mpegurl")
+            # Simulate a server/network stack incompatible with mpv while the
+            # system HTTP client can load it. Never bypass a real TLS check.
+            if direct:
+                Handler.mpv_network_counts["direct"] += 1
+                if query.get("slow-direct") == ["1"]: time.sleep(1)
+                self.send_error(403); return
+            if request.path == "/mpv-network/master.m3u8":
+                self.send_response(302); self.send_header("Location", "/mpv-network/redirect/master.m3u8"); self.end_headers(); return
+            if request.path == "/mpv-network/redirect/master.m3u8":
+                Handler.mpv_network_counts["playlist"] += 1
+                return self.send_bytes(b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\n../media.m3u8\n", "application/vnd.apple.mpegurl")
+            if request.path == "/mpv-network/media.m3u8":
+                Handler.mpv_network_counts["playlist"] += 1
+                return self.send_bytes(b"#EXTM3U\n#EXT-X-TARGETDURATION:16\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:15,\nclip.ts\n#EXT-X-ENDLIST\n", "application/vnd.apple.mpegurl")
+            if request.path == "/mpv-network/clip.ts":
+                Handler.mpv_network_counts["segment"] += 1
+                return self.send_bytes((ROOT / ".build/test-mpeg2.ts").read_bytes(), "video/mp2t")
+            if request.path == "/mpv-network/slow.m3u8":
+                time.sleep(1.5)
+                return self.send_bytes(b"not a playlist", "text/plain")
+            self.send_error(404); return
         if request.path in ("/edit-live-a.m3u", "/edit-live-b.m3u"):
             if self.headers.get("X-Source-Edit") != "fixture-preserved":
                 self.send_error(403); return
@@ -157,6 +193,9 @@ class Handler(SimpleHTTPRequestHandler):
                 content = f'<rss><list page="1" pagecount="1"><video><id>xml-1</id><name>XML 播放测试</name><year>2026</year><dl><dd flag="mp4"><![CDATA[正片${address}/test.mp4]]></dd></dl><des><![CDATA[<p>XML CDATA 测试</p>]]></des></video></list></rss>'
             return self.send_bytes(content.encode(), "application/xml")
         if request.path == "/test.mp4":
+            if query.get("airplay-stall") == ["1"] and not self.headers.get("User-Agent", "").lower().startswith(("libmpv", "vlc")):
+                time.sleep(20)
+                return self.send_bytes(b"stalled fixture", "text/plain")
             if query.get("require-vlc-headers") == ["1"] and (self.headers.get("User-Agent") != "TVBox-VLC-Fixture" or self.headers.get("Referer") != "https://fixture.invalid/"):
                 self.send_error(403); return
             if query.get("require-retry-header") == ["1"] and self.headers.get("X-Retry-Fixture") != "preserved":

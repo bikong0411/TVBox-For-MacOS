@@ -30,12 +30,16 @@ with zipfile.ZipFile(delivery / "TVBoxMac-Source.zip", "w", zipfile.ZIP_DEFLATED
     for path in sorted(source.rglob("*")):
         if path.is_file():
             archive.write(path, Path("TVBoxMac") / path.relative_to(source))
-(delivery / "使用说明.txt").write_text("""TVBox for macOS 0.8.2
+(delivery / "使用说明.txt").write_text("""TVBox for macOS 0.8.8
 
 直接打开 TVBox.app，可复制到“应用程序”后使用。
 适用于 Intel（x86_64）与 Apple Silicon（M 系列芯片），最低 macOS 13。
 默认优先复用本机 IINA 的 libmpv 播放组件，视频在 TVBox 内显示，不打开 IINA 窗口。组件未安装或不兼容时，自动回退随软件自带的 VLC；不强制安装其他播放器。配置管理 → 播放设置可选择“始终使用内置 VLC”。
 mpv 和 VLC 均支持 TVBox 内的进度、暂停、倍速、全屏、选台、记录与续播。IINA 的个人设置和播放记录不会被读取或改写。
+mpv 点播连接失败时自动尝试一次 macOS 网络兼容连接，保留进度和播放状态，仍由 mpv 在软件内播放；支持 HLS 分段、重定向和片源请求头。停止或换集关闭临时服务，不生成磁盘视频缓存，不关闭 HTTPS 证书校验。
+mpv 库加载与内核初始化改为后台执行，减少点击播放时的界面停顿。点播兼容连接成功后，同源且请求头相同的下一集优先复用该方式；记忆只在本次运行保留，15 分钟过期，最多 64 项，失效会清除并回退直连。直播及本地文件保留原路径，连接失败重试仍有次数限制。
+AirPlay 选中设备后主动发起视频播放，只有系统播放器就绪、定位完成且播放进度推进后才显示“投屏中”；加载、定位和电视响应均有超时，失败继续本机播放。系统 AirPlay 使用系统播放通道，部分 mpv / VLC 能播的片源仍可能无法直投，此时可尝试“安卓电视 · DLNA”。
+小米等兼容接收器可选择“投屏 → AirPlay 电视 → 兼容连接”中的电视，直接进行 AirPlay 视频投放。该方式不依赖系统播放器加载片源，客厅小米电视已验证出画及暂停、跳转、继续、停止和返回本机；上方系统 AirPlay 入口继续保留。兼容连接支持 HTTP / HTTPS、本地视频及 HLS 转发，支持切集重投和返回本机，电视音量请使用遥控器调整；结束时关闭临时转发服务，无磁盘视频缓存。需要密码或配对的设备请使用系统 AirPlay 完成授权，软件不会绕过授权。
 
 已支持：多个点播源与多个直播源独立保存和切换、JSON/XML 影视接口、分类搜索、多线路剧集、M3U/TXT 直播、视频直链、收藏和续播。
 暂不支持：Android JAR/CSP、JS/Python 爬虫、type 4、加密配置、网页嗅探和解析服务。

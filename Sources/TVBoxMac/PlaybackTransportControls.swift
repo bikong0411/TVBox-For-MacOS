@@ -120,7 +120,7 @@ struct PlaybackTransportControls: View {
                 Menu {
                     ForEach([Float(0.5), 1, 1.25, 1.5, 2], id: \.self) { rate in Button("\(String(format: "%g", rate))×") { controller.setRate(rate); activity() } }
                 } label: { Text("\(String(format: "%g", transport.effectiveRate))×").font(.system(size: 11, weight: .medium)).frame(width: 48, height: PlayerControlMetrics.buttonSize) }.frame(width: 48, height: PlayerControlMetrics.buttonSize)
-                    .disabled(transport.remoteSelected).help(transport.remoteSelected ? "DLNA 以正常速度播放" : "播放速度")
+                    .disabled(transport.remoteSelected).help(transport.remoteSelected ? "电视投屏以正常速度播放" : "播放速度")
                 HStack(spacing: 6) {
                     Button { transport.toggleMute(); activity() } label: { PlayerControlIcon(name: transport.muted || transport.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill") }.help("静音 / 恢复音量").disabled(!transport.canMute)
                     Slider(value: Binding(get: { transport.volume }, set: { transport.setVolume($0); activity() }), in: 0...1).frame(width: 72, height: PlayerControlMetrics.buttonSize).accessibilityLabel("音量").disabled(!transport.canVolume)

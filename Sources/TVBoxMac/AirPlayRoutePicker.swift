@@ -39,12 +39,17 @@ struct AirPlayRoutePicker: NSViewRepresentable {
 }
 
 struct AirPlayPlaybackStatus: View {
-    @ObservedObject var surface: PersistentVideoSurface
+    @ObservedObject var controller: PlayerController
     var body: some View {
-        if surface.externalPlaybackActive {
+        if controller.airPlayConnected {
             Label("正在通过 AirPlay 播放", systemImage: "airplayvideo")
                 .font(.system(size: 16, weight: .medium)).foregroundStyle(.white)
                 .padding(18).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+                .allowsHitTesting(false)
+        } else if controller.airPlayPreparing {
+            Label("正在连接 AirPlay，当前视频继续播放…", systemImage: "airplayvideo")
+                .font(.system(size: 13)).foregroundStyle(.white)
+                .padding(14).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
                 .allowsHitTesting(false)
         }
     }

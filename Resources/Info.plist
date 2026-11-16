@@ -5,8 +5,8 @@
   <key>CFBundleDisplayName</key><string>TVBox</string>
   <key>CFBundleExecutable</key><string>TVBoxMac</string>
   <key>CFBundleIdentifier</key><string>local.tvboxmac</string>
-  <key>CFBundleVersion</key><string>30</string>
-  <key>CFBundleShortVersionString</key><string>0.8.2</string>
+  <key>CFBundleVersion</key><string>36</string>
+  <key>CFBundleShortVersionString</key><string>0.8.8</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
@@ -14,6 +14,7 @@
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
   <key>NSLocalNetworkUsageDescription</key><string>发现同一网络中的 DLNA 电视与 AirPlay 设备，向你选择的电视提供视频并控制播放，也用于访问你配置的局域网影视服务。</string>
+  <key>NSBonjourServices</key><array><string>_airplay._tcp</string></array>
   <key>CFBundleDocumentTypes</key><array><dict>
     <key>CFBundleTypeName</key><string>TVBox Configuration</string>
     <key>CFBundleTypeRole</key><string>Viewer</string>

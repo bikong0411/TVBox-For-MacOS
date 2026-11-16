@@ -157,29 +157,17 @@ private struct PlayerContent: View {
                         Button { fullscreen.toggle(store: store) } label: { Label(fullscreen.isPresented ? "返回窗口" : "全屏", systemImage: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help("双击画面或按 Control + Command + F 切换全屏")
                         if current.isLive { Label(current.catchupProgramme == nil ? "LIVE" : "回看", systemImage: current.catchupProgramme == nil ? "dot.radiowaves.left.and.right" : "clock.arrow.circlepath").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent) }
                     }.font(.system(size: 12))
-                    if let notice = controller.componentNotice { Text(notice).font(.system(size: 12)).foregroundStyle(Theme.muted) }
                     PlaybackSurface(controller: controller, fullscreen: fullscreen).aspectRatio(16 / 9, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 12))
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(current.video.title).font(.system(size: 23, weight: .semibold)).lineLimit(2)
-                            Text("\(current.line.name) · \(current.episode.name)").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 20) {
+                            playbackTitle(current)
+                            Spacer(minLength: 0)
+                            PlaybackActions(controller: controller, current: current).fixedSize()
                         }
-                        Spacer()
-                        if current.isLive {
-                            if current.catchupProgramme != nil, let channel = store.playingChannel { Button("返回直播") { store.playChannel(channel) }.controlSize(.small) }
-                            if current.line.episodes.count > 1 { Button("下一条线路") { store.nextLiveRoute() }.controlSize(.small) }
-                            Button("上一台") { store.switchChannel(-1) }.disabled(!store.canSwitchChannel(-1)).controlSize(.small)
-                            Button("下一台") { store.switchChannel(1) }.disabled(!store.canSwitchChannel(1)).controlSize(.small)
+                        VStack(alignment: .leading, spacing: 14) {
+                            playbackTitle(current)
+                            ScrollView(.horizontal) { PlaybackActions(controller: controller, current: current) }.scrollIndicators(.hidden)
                         }
-                        Text(controller.playbackEngine).font(.system(size: 10)).foregroundStyle(Theme.muted)
-                        PlaybackRateMenu(controller: controller, casting: controller.dlna)
-                        Button { store.toggleFavorite(current.video, site: current.site) } label: { Image(systemName: store.isFavorite(current.video, site: current.site) ? "heart.fill" : "heart") }.disabled(current.isLive)
-                        Menu {
-                            Button("使用内置 VLC") { store.useBuiltInPlayback() }
-                            Button("使用 IINA 播放组件") { store.useIINAPlayback() }
-                            Divider()
-                            Button("复制播放地址") { store.copyURL() }
-                        } label: { Image(systemName: "ellipsis") }.frame(width: 45)
                     }
                     if current.line.episodes.count > 1 {
                         HStack { Text(current.isLive ? "切换线路" : "剧集").font(.system(size: 15, weight: .semibold)); Spacer(); if !current.isLive { Button("下一集") { store.nextEpisode() }.disabled(current.index + 1 >= current.line.episodes.count) } }
@@ -201,6 +189,66 @@ private struct PlayerContent: View {
             }
         }
     }
+
+    private func playbackTitle(_ current: Playback) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(current.video.title).font(.system(size: 23, weight: .semibold)).lineLimit(2)
+            Text("\(current.line.name) · \(current.episode.name)").font(.system(size: 12)).foregroundStyle(Theme.muted)
+        }
+    }
+}
+
+struct PlaybackActions: View {
+    @EnvironmentObject var store: AppStore
+    @ObservedObject var controller: PlayerController
+    let current: Playback
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            if current.isLive {
+                if current.catchupProgramme != nil, let channel = store.playingChannel {
+                    Button { store.playChannel(channel) } label: { Text("返回直播").playbackActionLabel() }
+                }
+                if current.line.episodes.count > 1 {
+                    Button { store.nextLiveRoute() } label: { Text("下一条线路").playbackActionLabel() }
+                }
+                Button { store.switchChannel(-1) } label: { Text("上一台").playbackActionLabel() }.disabled(!store.canSwitchChannel(-1))
+                Button { store.switchChannel(1) } label: { Text("下一台").playbackActionLabel() }.disabled(!store.canSwitchChannel(1))
+            }
+            Text(controller.playbackEngine).font(.system(size: 10)).foregroundStyle(Theme.muted)
+                .frame(height: 32).padding(.horizontal, 4)
+            PlaybackRateMenu(controller: controller, casting: controller.dlna)
+            Button { store.toggleFavorite(current.video, site: current.site) } label: {
+                Image(systemName: store.isFavorite(current.video, site: current.site) ? "heart.fill" : "heart")
+                    .font(.system(size: 16)).playbackActionLabel(width: 40)
+            }.disabled(current.isLive).help("收藏")
+            Menu {
+                Button("使用内置 VLC") { store.useBuiltInPlayback() }
+                Button("使用 IINA 播放组件") { store.useIINAPlayback() }
+                Divider()
+                Button("复制播放地址") { store.copyURL() }
+            } label: { Image(systemName: "ellipsis") }
+            .menuStyle(.borderlessButton).menuIndicator(.visible)
+            .frame(width: 34).playbackActionLabel(width: 58).help("更多播放选项")
+        }.buttonStyle(.plain).fixedSize(horizontal: true, vertical: true)
+    }
+}
+
+private struct PlaybackActionLabel: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+    var width: CGFloat?
+    func body(content: Content) -> some View {
+        content.font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, width == nil ? 12 : 0)
+            .frame(width: width, height: 32, alignment: .center)
+            .foregroundStyle(Theme.accent.opacity(isEnabled ? 1 : 0.35))
+            .background(Theme.accent.opacity(isEnabled ? 0.06 : 0.025), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+extension View {
+    func playbackActionLabel(width: CGFloat? = nil) -> some View { modifier(PlaybackActionLabel(width: width)) }
 }
 
 
@@ -219,7 +267,7 @@ struct PlaybackSurface: View {
                     NotificationCenter.default.post(name: .playerSurfacePointerActivity, object: controller.videoSurface)
                     return true
                 }) { fullscreen.toggle(store: store) }
-                AirPlayPlaybackStatus(surface: controller.videoSurface)
+                AirPlayPlaybackStatus(controller: controller)
                 DLNAPlaybackStatus(controller: controller, casting: controller.dlna)
                 if let error = controller.error {
                     VStack(spacing: 15) {

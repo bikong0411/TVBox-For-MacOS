@@ -139,6 +139,7 @@ public enum DLNAProtocol {
 
 public struct DLNAClient: Sendable {
     private let session: URLSession
+    private let airPlayVideo = AirPlayVideoClient()
     public init(session: URLSession? = nil) {
         if let session { self.session = session }
         else {
@@ -171,6 +172,9 @@ public struct DLNAClient: Sendable {
         return result
     }
     @discardableResult public func action(_ name: String, service: DLNAService, arguments: [(String, String)] = []) async throws -> [String: String] {
+        if service.type == AirPlayVideoProtocol.serviceType {
+            return try await airPlayVideo.action(name, endpoint: service.controlURL, arguments: arguments)
+        }
         var request = URLRequest(url: service.controlURL, timeoutInterval: 5)
         request.httpMethod = "POST"; request.setValue("text/xml; charset=\"utf-8\"", forHTTPHeaderField: "Content-Type")
         request.setValue("\"\(service.type)#\(name)\"", forHTTPHeaderField: "SOAPAction")
@@ -179,5 +183,9 @@ public struct DLNAClient: Sendable {
         let values = try DLNAProtocol.values(data, action: name)
         guard (200..<300).contains(http.statusCode) else { throw TVError.message("电视未能完成操作。（HTTP \(http.statusCode)）") }
         return values
+    }
+    public func playAirPlayVideo(_ media: URL, on device: DLNADevice) async throws {
+        guard device.isAirPlayVideo else { throw TVError.message("此设备没有提供 AirPlay 兼容接口。") }
+        try await airPlayVideo.play(media, on: device.transport.controlURL)
     }
 }
