@@ -2,19 +2,33 @@
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
-swift build -c release
-BIN_DIR="$(swift build -c release --show-bin-path)"
+TARGET="${1:-$(uname -m)}"
+case "$TARGET" in
+    arm64) ARCHES=(arm64); LABEL=AppleSilicon ;;
+    x86_64|intel) ARCHES=(x86_64); LABEL=Intel ;;
+    --universal|universal) ARCHES=(arm64 x86_64); LABEL=Universal ;;
+    *) echo "Usage: build-app.sh [arm64|intel|--universal]" >&2; exit 1 ;;
+esac
+bash scripts/prepare-vlc.sh
+BINS=()
+for ARCH in "${ARCHES[@]}"; do
+    swift build -c release --arch "$ARCH"
+    BINS+=("$(swift build -c release --arch "$ARCH" --show-bin-path)/TVBoxMac")
+done
 APP_DIR="$PROJECT_DIR/dist/Release/TVBox.app"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-mkdir -p "$APP_DIR/Contents/Helpers"
-bash "$PROJECT_DIR/scripts/build-remux.sh"
-cp "$PROJECT_DIR/.build/remux/tvbox-remux" "$APP_DIR/Contents/Helpers/tvbox-remux"
-cp "$PROJECT_DIR/.build/remux/COPYING.LGPLv2.1" "$APP_DIR/Contents/Resources/FFmpeg-LICENSE.txt"
-codesign --force --sign - "$APP_DIR/Contents/Helpers/tvbox-remux"
-cp "$BIN_DIR/TVBoxMac" "$APP_DIR/Contents/MacOS/TVBoxMac"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Helpers" "$APP_DIR/Contents/Frameworks"
+for ARCH in "${ARCHES[@]}"; do bash "$PROJECT_DIR/scripts/build-remux.sh" "$ARCH"; done
+HELPERS=()
+for ARCH in "${ARCHES[@]}"; do HELPERS+=("$PROJECT_DIR/.build/remux-$ARCH/tvbox-remux"); done
+lipo -create "${HELPERS[@]}" -output "$APP_DIR/Contents/Helpers/tvbox-remux"
+cp "$PROJECT_DIR/.build/remux-${ARCHES[0]}/COPYING.LGPLv2.1" "$APP_DIR/Contents/Resources/FFmpeg-LICENSE.txt"
+cp "$PROJECT_DIR/Resources/VLCKit-LICENSE.txt" "$APP_DIR/Contents/Resources/VLCKit-LICENSE.txt"
+cp "$PROJECT_DIR/ThirdPartySources/README.md" "$APP_DIR/Contents/Resources/ThirdParty-Notices.md"
+ditto "$PROJECT_DIR/Vendor/VLCKit.xcframework/macos-arm64_x86_64/VLCKit.framework" "$APP_DIR/Contents/Frameworks/VLCKit.framework"
+lipo -create "${BINS[@]}" -output "$APP_DIR/Contents/MacOS/TVBoxMac"
 cp "$PROJECT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 swift "$PROJECT_DIR/scripts/make-icon.swift" "$PROJECT_DIR/dist"
 iconutil -c icns "$PROJECT_DIR/dist/TVBox.iconset" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
-codesign --force --sign - "$APP_DIR"
-ditto -c -k --keepParent "$APP_DIR" "$PROJECT_DIR/dist/TVBox-macOS-AppleSilicon.zip"
-echo "App: $APP_DIR"
+python3 "$PROJECT_DIR/scripts/sign-and-check-app.py" "$APP_DIR" "${ARCHES[@]}"
+ditto -c -k --keepParent "$APP_DIR" "$PROJECT_DIR/dist/TVBox-macOS-$LABEL.zip"
+echo "$LABEL App: $APP_DIR"

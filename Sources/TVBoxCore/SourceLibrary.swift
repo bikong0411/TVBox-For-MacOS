@@ -7,7 +7,7 @@ public enum SourceImportTarget: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
-public struct SavedVODSource: Codable, Identifiable, Sendable {
+public struct SavedVODSource: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var origin: String
@@ -22,7 +22,7 @@ public struct SavedVODSource: Codable, Identifiable, Sendable {
     }
 }
 
-public struct SavedLiveSource: Codable, Identifiable, Sendable {
+public struct SavedLiveSource: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var origin: String
@@ -188,6 +188,39 @@ public struct SourceLibrary: Codable, Sendable {
     public mutating func renameLive(_ id: String, name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let index = liveSources.firstIndex(where: { $0.id == id }) else { return }; liveSources[index].name = trimmed
+    }
+    /// Replace one saved entry without importing/activating other entries from
+    /// the new configuration. IDs scope history and must remain stable.
+    public mutating func replaceVOD(_ id: String, configuration: Configuration, name: String) throws {
+        guard let index = vodSources.firstIndex(where: { $0.id == id }) else { throw TVError.message("这个点播源已被移除，请重新打开配置管理。") }
+        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { throw TVError.message("请输入源名称。") }
+        guard !configuration.sites.isEmpty || !configuration.subscriptions.isEmpty else { throw TVError.message("新地址没有点播接口或子配置，原点播源已保留。") }
+        guard !vodSources.contains(where: { $0.id != id && $0.origin == configuration.location }) else { throw TVError.message("这个点播地址已经存在，请选择已有的源，或使用其他地址。") }
+        var updated = vodSources[index]
+        updated.name = label; updated.origin = configuration.location
+        updated.configuration = Self.vodPayload(configuration)
+        if !configuration.sites.contains(where: { $0.id == updated.selectedSiteID && $0.supported }) {
+            updated.selectedSiteID = configuration.sites.first(where: \.supported)?.id ?? ""
+        }
+        vodSources[index] = updated
+    }
+    public mutating func replaceLive(_ id: String, configuration: Configuration, name: String) throws {
+        guard let index = liveSources.firstIndex(where: { $0.id == id }) else { throw TVError.message("这个直播源已被移除，请重新打开配置管理。") }
+        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { throw TVError.message("请输入源名称。") }
+        let feeds = Array(Set(configuration.feeds.map(\.url)))
+        let feedURL: String?
+        if feeds.count == 1 && configuration.channels.isEmpty { feedURL = feeds[0] }
+        else if feeds.isEmpty && (!configuration.channels.isEmpty || !configuration.subscriptions.isEmpty) { feedURL = nil }
+        else if feeds.isEmpty { throw TVError.message("新地址没有直播频道、订阅或子配置，原直播源已保留。") }
+        else { throw TVError.message("新地址包含多个直播来源，请填写其中一个订阅地址，或通过“添加直播源”导入整个配置。") }
+        let address = feedURL ?? configuration.location
+        guard !liveSources.contains(where: { $0.id != id && ($0.feedURL ?? $0.configuration.location) == address }) else { throw TVError.message("这个直播地址已经存在，请选择已有的源，或使用其他地址。") }
+        var updated = liveSources[index]
+        updated.name = label; updated.origin = configuration.location
+        updated.feedURL = feedURL; updated.configuration = Self.livePayload(configuration, feedURL: feedURL)
+        liveSources[index] = updated
     }
 }
 

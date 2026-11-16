@@ -4,13 +4,17 @@ from pathlib import Path
 import plistlib
 import shutil
 import subprocess
+import sys
 
 root = Path(__file__).resolve().parent.parent
-destination = root / "dist/TVBox-Validation.app"
-shutil.copytree(root / "dist/Release/TVBox.app", destination, dirs_exist_ok=True)
+intel = len(sys.argv) > 1 and sys.argv[1] == "intel"
+destination = root / ("dist/TVBox-Intel-Validation.app" if intel else "dist/TVBox-Validation.app")
+release = root / ("dist/Intel/TVBox.app" if intel else "dist/Release/TVBox.app")
+if destination.exists(): shutil.rmtree(destination)
+shutil.copytree(release, destination, symlinks=True)
 info_path = destination / "Contents/Info.plist"
 info = plistlib.loads(info_path.read_bytes())
-info["CFBundleIdentifier"] = "local.tvboxmac.validation.fullscreenfix.054"
+info["CFBundleIdentifier"] = "local.tvboxmac.validation.sources.071" + (".intel" if intel else "")
 info["CFBundleDisplayName"] = "TVBox 验证"
 info["CFBundleName"] = "TVBox 验证"
 info_path.write_bytes(plistlib.dumps(info))

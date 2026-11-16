@@ -51,7 +51,7 @@ public struct PlaybackFailure: Equatable {
         } else {
             kind = .playback
             title = "暂时无法播放"
-            message = "系统播放器未能加载视频。请检查片源状态和视频格式，或重新连接。"
+            message = "播放器未能读取有效的视频。请重试或切换线路；仍然失败时，请刷新片源地址。"
         }
         let chain = errors.map { "\($0.domain) (\($0.code))" }.joined(separator: " → ")
         let statuses = mediaStatusCodes.isEmpty ? "" : "媒体状态：" + mediaStatusCodes.map(String.init).joined(separator: ", ")

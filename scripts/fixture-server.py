@@ -16,6 +16,13 @@ class Handler(SimpleHTTPRequestHandler):
         request = urlparse(self.path)
         query = parse_qs(request.query)
         address = f"http://127.0.0.1:{self.server.server_port}"
+        if request.path in ("/edit-live-a.m3u", "/edit-live-b.m3u"):
+            if self.headers.get("X-Source-Edit") != "fixture-preserved":
+                self.send_error(403); return
+            return self.send_bytes(f'#EXTM3U\n#EXTINF:-1 group-title="修改验证",测试频道\n{address}/test.mp4\n'.encode(), "audio/x-mpegurl")
+        if request.path == "/edit-slow.json":
+            time.sleep(0.6)
+            return self.send_json({"name": "慢响应", "sites": [{"key": "slow-edit", "name": "新接口", "type": 1, "api": address + "/api"}]})
         if request.path == "/grouping.m3u":
             names = ["湖南卫视", "CCTV1 综合", "CHC高清电影", "金鹰卡通", "广东体育", "CCTV1 高清", "凤凰资讯", "浙江卫视", "CCTV5+ 体育", "CCTV13 新闻", "家庭影院", "少儿动画", "高清足球", "新闻直播", "Discovery探索", "经典音乐", "CETV1", "健康生活", "NHK World", "上海都市", "自定义频道"]
             rows = ["#EXTM3U"]
@@ -150,6 +157,8 @@ class Handler(SimpleHTTPRequestHandler):
                 content = f'<rss><list page="1" pagecount="1"><video><id>xml-1</id><name>XML 播放测试</name><year>2026</year><dl><dd flag="mp4"><![CDATA[正片${address}/test.mp4]]></dd></dl><des><![CDATA[<p>XML CDATA 测试</p>]]></des></video></list></rss>'
             return self.send_bytes(content.encode(), "application/xml")
         if request.path == "/test.mp4":
+            if query.get("require-vlc-headers") == ["1"] and (self.headers.get("User-Agent") != "TVBox-VLC-Fixture" or self.headers.get("Referer") != "https://fixture.invalid/"):
+                self.send_error(403); return
             if query.get("require-retry-header") == ["1"] and self.headers.get("X-Retry-Fixture") != "preserved":
                 self.send_error(403); return
             clip = ROOT / ".build" / "test.mp4"

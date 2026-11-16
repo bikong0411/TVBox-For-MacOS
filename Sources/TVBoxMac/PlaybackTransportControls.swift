@@ -27,51 +27,28 @@ struct PlayerControlIcon: View {
     @Published private(set) var playing = false
     @Published private(set) var volume: Double = 1
     @Published private(set) var muted = false
-    let player: AVPlayer
-    private var timeToken: Any?
-    private var observations: [NSKeyValueObservation] = []
-    init(player: AVPlayer) {
-        self.player = player
-        timeToken = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+    let controller: PlayerController
+    private var clock: Task<Void, Never>?
+    init(controller: PlayerController) {
+        self.controller = controller
+        clock = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.refresh()
+                do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
+            }
         }
-        observations = [
-            player.observe(\.rate, options: [.initial, .new]) { [weak self] _, _ in Task { @MainActor in self?.refresh() } },
-            player.observe(\.volume, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.refresh() } },
-            player.observe(\.isMuted, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.refresh() } },
-            player.observe(\.currentItem, options: [.new]) { [weak self] _, _ in Task { @MainActor in self?.refresh() } }
-        ]
         refresh()
     }
     func refresh() {
-        let current = player.currentTime().seconds, total = player.currentItem?.duration.seconds ?? 0
-        position = current.isFinite ? max(0, current) : 0
-        duration = total.isFinite && total > 0 ? total : 0
-        playing = player.rate != 0; volume = Double(player.volume); muted = player.isMuted
+        position = controller.position; duration = controller.duration
+        playing = controller.playing; volume = controller.volume; muted = controller.muted
     }
-    func togglePlayback(rate: Float) {
-        if player.rate == 0 {
-            if duration > 0, position >= duration - 0.05, let item = player.currentItem {
-                player.seek(to: .zero) { [weak self, weak item] _ in
-                    Task { @MainActor in
-                        guard let self, self.player.currentItem === item else { return }
-                        self.player.playImmediately(atRate: rate); self.refresh()
-                    }
-                }
-            } else { player.playImmediately(atRate: rate) }
-        } else { player.pause() }
-        refresh()
-    }
-    func seek(to value: Double) {
-        guard value.isFinite, duration > 0, let item = player.currentItem else { return }
-        let target = min(max(0, value), duration)
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] _ in
-            Task { @MainActor in guard let self, self.player.currentItem === item else { return }; self.refresh() }
-        }
-    }
-    func setVolume(_ value: Double) { guard value.isFinite else { return }; player.volume = Float(min(1, max(0, value))); refresh() }
-    func toggleMute() { player.isMuted.toggle(); refresh() }
-    deinit { if let timeToken { player.removeTimeObserver(timeToken) } }
+    func togglePlayback(rate: Float) { controller.togglePlayback(); refresh() }
+    func seek(to value: Double) { controller.seek(to: value); refresh() }
+    func setVolume(_ value: Double) { controller.setVolume(value); refresh() }
+    func toggleMute() { controller.toggleMute(); refresh() }
+    deinit { clock?.cancel() }
+
 }
 
 struct PlaybackTransportControls: View {
@@ -90,7 +67,7 @@ struct PlaybackTransportControls: View {
     init(controller: PlayerController, surface: PersistentVideoSurface, live: Bool, isFullscreen: Bool, onToggleFullscreen: @escaping () -> Void) {
         self.controller = controller; self.surface = surface; self.live = live
         self.isFullscreen = isFullscreen; self.onToggleFullscreen = onToggleFullscreen
-        _transport = StateObject(wrappedValue: PlaybackTransport(player: controller.player))
+        _transport = StateObject(wrappedValue: PlaybackTransport(controller: controller))
     }
     private var shown: Bool { visible || !controller.ready || !transport.playing || hoveringControls || scrubbing || selectingAirPlay }
     var body: some View {
@@ -114,6 +91,13 @@ struct PlaybackTransportControls: View {
                     Button { transport.seek(to: transport.position + 15); activity() } label: { PlayerControlIcon(name: "goforward.15") }.help("前进 15 秒")
                 } else if live { Text("LIVE").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.accent) }
                 Spacer(minLength: 4)
+                if controller.systemPlayback {
+                    if controller.canUseVLCPlayback {
+                        Button("返回 VLC") { controller.useVLCPlayback(); activity() }.font(.system(size: 10)).help("恢复内置 VLC 播放，结束系统投屏或画中画")
+                    } else {
+                        Text("兼容播放").font(.system(size: 10)).help("此地址的自定义鉴权请求头需要系统兼容播放通道")
+                    }
+                }
                 Menu {
                     ForEach([Float(0.5), 1, 1.25, 1.5, 2], id: \.self) { rate in Button("\(String(format: "%g", rate))×") { controller.setRate(rate); activity() } }
                 } label: { Text("\(String(format: "%g", controller.rate))×").font(.system(size: 11, weight: .medium)).frame(width: 48, height: PlayerControlMetrics.buttonSize) }.frame(width: 48, height: PlayerControlMetrics.buttonSize)
@@ -121,10 +105,12 @@ struct PlaybackTransportControls: View {
                     Button { transport.toggleMute(); activity() } label: { PlayerControlIcon(name: transport.muted || transport.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill") }.help("静音 / 恢复音量")
                     Slider(value: Binding(get: { transport.volume }, set: { transport.setVolume($0); activity() }), in: 0...1).frame(width: 72, height: PlayerControlMetrics.buttonSize).accessibilityLabel("音量")
                 }
-                Button { surface.togglePictureInPicture(); activity() } label: { PlayerControlIcon(name: "pip.enter") }
-                    .disabled(!surface.pictureInPicturePossible && !surface.pictureInPictureActive).help("画中画")
+                Button { controller.togglePictureInPicture(); activity() } label: { PlayerControlIcon(name: "pip.enter") }
+                    .help("画中画（使用系统播放通道）")
                 HStack(spacing: 4) {
-                    AirPlayRoutePicker(player: controller.player) { selectingAirPlay = $0; activity() }
+                    AirPlayRoutePicker(player: controller.player) { presenting in
+                        selectingAirPlay = presenting; if presenting { controller.useSystemPlayback() }; activity()
+                    }
                         .frame(width: 26, height: 26)
                         .frame(width: PlayerControlMetrics.buttonSize, height: PlayerControlMetrics.buttonSize)
                     Text(surface.externalPlaybackActive ? "投屏中" : "投屏").font(.system(size: 11, weight: .medium))
@@ -146,6 +132,7 @@ struct PlaybackTransportControls: View {
         .onHover { hoveringControls = $0; activity() }
         .onReceive(NotificationCenter.default.publisher(for: .playerSurfacePointerActivity, object: surface)) { _ in activity() }
         .onChange(of: transport.playing) { _ in activity() }
+        .onChange(of: controller.systemPlayback) { _ in transport.refresh(); activity() }
         .onChange(of: controller.ready) { ready in transport.refresh(); if !ready { scrubbing = false; draft = 0 } }
         .onAppear { activity() }.onDisappear { hideTask?.cancel() }
         .alert("画中画", isPresented: Binding(get: { surface.pictureInPictureError != nil }, set: { if !$0 { surface.pictureInPictureError = nil } })) { Button("知道了") { surface.pictureInPictureError = nil } } message: { Text(surface.pictureInPictureError ?? "") }

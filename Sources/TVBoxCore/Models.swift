@@ -45,7 +45,7 @@ public struct Subscription: Codable, Identifiable, Hashable, Sendable {
     public var id: String { url }
 }
 
-public struct Configuration: Codable, Sendable {
+public struct Configuration: Codable, Equatable, Sendable {
     public var name: String
     public var location: String
     public var sites: [Site]

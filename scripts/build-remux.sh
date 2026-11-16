@@ -1,14 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD_DIR="$PROJECT_DIR/.build/remux"
-SOURCE_DIR="$PROJECT_DIR/.build/ffmpeg-8.1.1-minimal"
+python3 "$PROJECT_DIR/scripts/fetch-dependencies.py"
+ARCH="${1:-$(uname -m)}"
+case "$ARCH" in arm64|x86_64) ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac
+BUILD_DIR="$PROJECT_DIR/.build/remux-$ARCH"
+SOURCE_DIR="$PROJECT_DIR/.build/ffmpeg-8.1.1-$ARCH-minimal"
 mkdir -p "$BUILD_DIR"
 if [[ ! -f "$SOURCE_DIR/ffbuild/config.mak" || "$PROJECT_DIR/scripts/build-remux.sh" -nt "$SOURCE_DIR/ffbuild/config.mak" ]]; then
     mkdir -p "$SOURCE_DIR"
     tar -xJf "$PROJECT_DIR/ThirdPartySources/ffmpeg-8.1.1.tar.xz" --strip-components 1 -C "$SOURCE_DIR"
     cd "$SOURCE_DIR"
-    ./configure --cc=clang --arch=arm64 --target-os=darwin \
+    ./configure --cc="clang -arch $ARCH" --arch="$ARCH" --target-os=darwin --enable-cross-compile --disable-x86asm \
       --extra-cflags=-mmacosx-version-min=13.0 --extra-ldflags=-mmacosx-version-min=13.0 \
       --disable-shared --enable-static --disable-programs --disable-doc --disable-debug \
       --disable-everything --disable-autodetect --disable-avdevice --disable-avfilter \
@@ -21,7 +24,7 @@ if [[ ! -f "$SOURCE_DIR/ffbuild/config.mak" || "$PROJECT_DIR/scripts/build-remux
       > "$BUILD_DIR/configure.log"
 fi
 make -C "$SOURCE_DIR" -j4 > "$BUILD_DIR/make.log" 2>&1
-clang -O2 -mmacosx-version-min=13.0 -I "$SOURCE_DIR" \
+clang -arch "$ARCH" -O2 -mmacosx-version-min=13.0 -I "$SOURCE_DIR" \
   "$PROJECT_DIR/Helpers/tvbox-remux.c" \
   "$SOURCE_DIR/libavformat/libavformat.a" "$SOURCE_DIR/libavcodec/libavcodec.a" "$SOURCE_DIR/libavutil/libavutil.a" \
   -framework Security -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework CoreServices \

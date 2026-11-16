@@ -201,17 +201,17 @@ struct VideoCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 ZStack(alignment: .bottomLeading) {
-                    PosterView(video: video, index: index).aspectRatio(0.70, contentMode: .fit)
+                    PosterView(video: video, index: index)
                     LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
                     if !video.note.isEmpty { Text(video.note).font(.system(size: 10, weight: .medium)).lineLimit(1).padding(12).foregroundStyle(.white.opacity(0.9)) }
                     if hovered {
                         Color.black.opacity(0.22)
                         Image(systemName: "play.circle.fill").font(.system(size: 45)).foregroundStyle(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                }.clipShape(RoundedRectangle(cornerRadius: 11)).overlay(RoundedRectangle(cornerRadius: 11).stroke(hovered ? Theme.accent.opacity(0.7) : Theme.line))
-                Text(video.title).font(.system(size: 13, weight: .medium)).lineLimit(1).foregroundStyle(.white.opacity(0.9))
-                Text(footnote ?? [video.year, video.area].filter { !$0.isEmpty }.joined(separator: " · ")).font(.system(size: 10)).foregroundStyle(Theme.muted).lineLimit(1)
-            }.contentShape(Rectangle())
+                }.aspectRatio(0.70, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 11)).overlay(RoundedRectangle(cornerRadius: 11).stroke(hovered ? Theme.accent.opacity(0.7) : Theme.line))
+                Text(video.title).font(.system(size: 13, weight: .medium)).lineLimit(1).foregroundStyle(.white.opacity(0.9)).frame(maxWidth: .infinity, alignment: .leading)
+                Text(footnote ?? [video.year, video.area].filter { !$0.isEmpty }.joined(separator: " · ")).font(.system(size: 10)).foregroundStyle(Theme.muted).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(.plain).onHover { hovered = $0 }
     }
 }
@@ -224,6 +224,7 @@ struct PosterView: View {
         return palette[index % palette.count]
     }
     var body: some View {
+        GeometryReader { bounds in
         AsyncImage(url: URL(string: video.poster)) { image in image.resizable().scaledToFill() } placeholder: {
             ZStack {
                 LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -240,6 +241,7 @@ struct PosterView: View {
                     Spacer().frame(height: 25)
                 }.padding(20)
             }
+        }.frame(width: bounds.size.width, height: bounds.size.height).clipped()
         }.clipped()
     }
 }

@@ -2,6 +2,7 @@
 """Compile the released HTTP engine with the actual UI model, then test local fixtures."""
 from pathlib import Path
 import subprocess
+import platform
 import sys
 import argparse
 import uuid
@@ -12,7 +13,7 @@ parser.add_argument("--render", action="store_true")
 args = parser.parse_args()
 
 root = Path(__file__).resolve().parent.parent
-build = root / ".build/arm64-apple-macosx/release"
+build = root / f".build/{platform.machine()}-apple-macosx/release"
 binary = root / ".build/check-network-probe"
 objects = sorted((build / "TVBoxCore.build").glob("*.o"))
 if not objects:

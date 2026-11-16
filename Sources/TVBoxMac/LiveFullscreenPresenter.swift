@@ -31,7 +31,7 @@ import AppKit
         window.onEscape = { [weak self] in self?.close() }
         self.window = window; closeRequested = false; phase = .entering
         store.player.videoSurface.setFullscreenHost(true)
-        // Reuse AVPlayer, current item, clock, buffers and rate; the inline
+        // Reuse the active decoder, clock, buffers and rate; the inline
         // player view detaches while fullscreen owns the video surface.
         isPresented = true
         window.contentView = NSHostingView(rootView: PlaybackFullscreenContent().environmentObject(store).preferredColorScheme(.dark))

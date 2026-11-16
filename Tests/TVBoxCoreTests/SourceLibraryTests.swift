@@ -147,4 +147,73 @@ import Testing
         #expect(selected)
         #expect(library.activeVOD?.name == "爬虫")
     }
+    @Test func editingVODKeepsIdentitySelectionsAndOtherSources() throws {
+        var library = SourceLibrary()
+        try library.add(vod("第一源", suffix: "first"), target: .vod)
+        library.selectSite("b"); let id = library.selectedVODID!
+        let oldHistoryKey = LibraryEntry(video: Video(id: "42", title: "历史"), site: library.activeVOD?.runtimeSite("b")).id
+        try library.add(vod("另一个源", suffix: "other"), target: .vod, activate: false)
+        try library.add(live("直播", suffix: "live"), target: .live)
+        let other = library.vodSources[1], liveBefore = library.liveSources, selection = library.selection
+        try library.replaceVOD(id, configuration: vod("远端名", suffix: "new"), name: " 修改后的名称 ")
+        #expect(library.vodSources.count == 2)
+        #expect(library.activeVOD?.id == id)
+        #expect(library.activeVOD?.name == "修改后的名称")
+        #expect(library.activeVOD?.origin == "https://example.org/new.json")
+        #expect(library.activeVOD?.selectedSiteID == "b")
+        #expect(library.vodSources[1] == other && library.liveSources == liveBefore)
+        #expect(library.selection.vodID == selection.vodID && library.selection.liveID == selection.liveID)
+        #expect(LibraryEntry(video: Video(id: "42", title: "历史"), site: library.activeVOD?.runtimeSite("b")).id == oldHistoryKey)
+    }
+    @Test func editingInactiveVODDoesNotActivateAndFallsBackToValidInterface() throws {
+        var library = SourceLibrary()
+        try library.add(vod("第一", suffix: "first")); let first = library.selectedVODID!
+        library.selectSite("b")
+        try library.add(vod("当前", suffix: "active")); let active = library.selectedVODID
+        let replacement = Configuration(location: "https://example.org/replacement.json", sites: [Site(key: "new", name: "新接口", type: 1, api: "https://example.org/api")])
+        try library.replaceVOD(first, configuration: replacement, name: "改名")
+        #expect(library.selectedVODID == active)
+        #expect(library.vodSources[0].selectedSiteID == "new")
+    }
+    @Test func invalidAndDuplicateVODEditsLeaveOriginalUntouched() throws {
+        var library = SourceLibrary()
+        try library.add(vod("一", suffix: "one")); let id = library.selectedVODID!
+        try library.add(vod("二", suffix: "two"))
+        let before = library.vodSources
+        for config in [live("直播", suffix: "wrong"), vod("重复", suffix: "two")] {
+            do { try library.replaceVOD(id, configuration: config, name: "不能保存"); Issue.record("Invalid edit accepted") } catch {}
+            #expect(library.vodSources == before)
+        }
+        do { try library.replaceVOD("missing", configuration: vod("新", suffix: "new"), name: "失效"); Issue.record("Removed source reappeared") } catch {}
+        #expect(library.vodSources == before)
+    }
+    @Test func editingOneLiveSubscriptionPreservesSiblingsMetadataAndVOD() throws {
+        var library = SourceLibrary()
+        let old = LiveFeed(name: "旧订阅", url: "https://example.org/old.m3u", headers: ["Authorization": "fixture-only"], guide: LiveGuideInfo(url: "https://example.org/epg.xml"))
+        let sibling = LiveFeed(name: "同配置的另一条", url: "https://example.org/sibling.m3u")
+        try library.add(Configuration(location: "https://example.org/combined.json", sites: vod("点播", suffix: "vod").sites, feeds: [old, sibling]))
+        let id = library.liveSources[0].id, siblingBefore = library.liveSources[1], vodBefore = library.vodSources
+        library.selectLive(siblingBefore.id)
+        var feed = old; feed.url = "https://example.org/new.m3u"
+        try library.replaceLive(id, configuration: Configuration(location: feed.url, feeds: [feed]), name: "新直播")
+        #expect(library.liveSources.count == 2 && library.liveSources[1] == siblingBefore)
+        #expect(library.selectedLiveID == siblingBefore.id && library.vodSources == vodBefore)
+        #expect(library.liveSources[0].id == id && library.liveSources[0].feedURL == feed.url)
+        #expect(library.liveSources[0].origin == feed.url)
+        #expect(library.liveSources[0].feeds[0].headers == old.headers && library.liveSources[0].feeds[0].guide == old.guide)
+        let restored = try JSONDecoder().decode(SourceLibrary.self, from: JSONEncoder().encode(library))
+        #expect(restored.liveSources == library.liveSources)
+    }
+    @Test func liveEditRejectsAmbiguityAndDuplicatesAtomically() throws {
+        var library = SourceLibrary()
+        try library.add(live("一", suffix: "one")); let id = library.selectedLiveID!
+        try library.add(live("二", suffix: "two")); let before = library.liveSources
+        let ambiguous = Configuration(location: "https://example.org/multi.json", feeds: [
+            LiveFeed(name: "A", url: "https://example.org/a.m3u"),
+            LiveFeed(name: "B", url: "https://example.org/b.m3u")])
+        for config in [ambiguous, vod("错误类型", suffix: "vod"), live("重复", suffix: "two")] {
+            do { try library.replaceLive(id, configuration: config, name: "不能保存"); Issue.record("Invalid live edit accepted") } catch {}
+            #expect(library.liveSources == before)
+        }
+    }
 }

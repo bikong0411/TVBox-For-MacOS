@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVKit
+import VLCKit
 import TVBoxCore
 import UniformTypeIdentifiers
 
@@ -69,7 +70,59 @@ enum LiveLayout: String, CaseIterable, Identifiable {
 }
 
 @MainActor final class PlayerController: ObservableObject {
+    // The system player is reserved for AirPlay / PiP and custom HTTP headers.
+    // Ordinary playback uses the independent VLC framework bundled in the app.
     let player = AVPlayer()
+    private(set) var nativeSession: VLCPlaybackSession?
+    @Published private(set) var systemPlayback = false
+    private var nativeVolume: Double = 1
+    private var nativeMuted = false
+    private var clockTask: Task<Void, Never>?
+    private var nativeSeekTask: Task<Void, Never>?
+    private var pendingPiP = false
+    var position: Double { systemPlayback ? max(0, player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0) : (nativeSession?.position ?? 0) }
+    var duration: Double { let value = systemPlayback ? (player.currentItem?.duration.seconds ?? 0) : (nativeSession?.duration ?? 0); return value.isFinite && value > 0 ? value : 0 }
+    var playing: Bool { systemPlayback ? player.rate != 0 : (nativeSession?.playing ?? false) }
+    var volume: Double { systemPlayback ? Double(player.volume) : nativeVolume }
+    var muted: Bool { systemPlayback ? player.isMuted : nativeMuted }
+    var canUseVLCPlayback: Bool {
+        currentRequest?.headers.keys.allSatisfy { ["user-agent", "referer", "referrer"].contains($0.lowercased()) } ?? true
+    }
+    func setVolume(_ value: Double) { guard value.isFinite else { return }; nativeVolume = min(1, max(0, value)); player.volume = Float(nativeVolume); nativeSession?.setVolume(nativeVolume) }
+    func toggleMute() { nativeMuted = !muted; player.isMuted = nativeMuted; nativeSession?.setMuted(nativeMuted) }
+    func pause() { if systemPlayback { player.pause() } else { nativeSession?.pause() } }
+    func togglePlayback() {
+        if playing { pause() }
+        else if systemPlayback { if duration > 0 && position >= duration - 0.1 { seek(to: 0) }; player.playImmediately(atRate: rate) }
+        else { if duration > 0 && position >= duration - 0.1 { seek(to: 0) }; nativeSession?.play() }
+    }
+    func seek(to seconds: Double) {
+        guard ready, seconds.isFinite, duration > 0 else { return }
+        nativeSeekTask?.cancel(); pendingKeyboardSeek = nil
+        let target = min(max(0, seconds), duration)
+        if systemPlayback { player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+        else { nativeSession?.seek(to: target) }
+    }
+    func useSystemPlayback() {
+        guard !systemPlayback, let request = currentRequest else { return }
+        let resume = position, paused = ready && !playing
+        nativeVolume = volume; nativeMuted = muted
+        clearAttempt(); systemPlayback = true
+        videoSurface.setSystemPlayback(true)
+        begin(request.episode, headers: request.headers, position: request.isLive ? 0 : resume, isLive: request.isLive, resumePaused: paused)
+    }
+    func useVLCPlayback() {
+        guard systemPlayback, let request = currentRequest else { return }
+        let resume = position, paused = ready && !playing
+        nativeVolume = volume; nativeMuted = muted
+        stopPresentation(); clearAttempt(); systemPlayback = false
+        videoSurface.setSystemPlayback(false)
+        begin(request.episode, headers: request.headers, position: request.isLive ? 0 : resume, isLive: request.isLive, resumePaused: paused)
+    }
+    func togglePictureInPicture() {
+        if !systemPlayback { pendingPiP = true; useSystemPlayback() }
+        else { videoSurface.togglePictureInPicture() }
+    }
     private var storedVideoSurface: PersistentVideoSurface?
     var videoSurface: PersistentVideoSurface {
         if let storedVideoSurface { return storedVideoSurface }
@@ -111,16 +164,21 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private var keyboardSeekGeneration = UUID()
     init() {
         player.allowsExternalPlayback = true
-        timeToken = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            Task { @MainActor in if time.seconds.isFinite { self?.onProgress?(time.seconds) } }
+        clockTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
+                guard let self else { return }; if self.ready { self.onProgress?(self.position) }
+            }
         }
     }
     func play(_ episode: Episode, headers: [String: String], position: Double = 0, isLive: Bool = false) {
-        stop(); error = nil; failure = nil; ready = false
+        let keepSystemOutput = systemPlayback && (videoSurface.externalPlaybackActive || videoSurface.pictureInPictureActive)
+        stop(); systemPlayback = keepSystemOutput; error = nil; failure = nil; ready = false
         begin(episode, headers: headers, position: position, isLive: isLive)
     }
     func playLive(_ episodes: [Episode], index: Int, headers: [String: String], onRoute: @escaping (Int) -> Void) {
-        stop(); error = nil; failure = nil
+        let keepSystemOutput = systemPlayback && (videoSurface.externalPlaybackActive || videoSurface.pictureInPictureActive)
+        stop(); systemPlayback = keepSystemOutput; error = nil; failure = nil
         livePlan = LiveRoutePlan(episodes: episodes, startingAt: index)
         liveHeaders = headers; onLiveRoute = onRoute
         if let next = livePlan?.next() { startLiveRoute(next) }
@@ -144,10 +202,72 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         }
         let token = UUID(); generation = token
         connectingMessage = connectionText("正在连接视频…")
+        if !systemPlayback {
+            let supported = Set(["user-agent", "referer", "referrer"])
+            if headers.keys.contains(where: { !supported.contains($0.lowercased()) }) { systemPlayback = true }
+        }
+        videoSurface.setSystemPlayback(systemPlayback)
+        if !systemPlayback {
+            loadVLC(url, headers: headers, position: position, token: token, resumePaused: resumePaused); return
+        }
         if isLive && url.pathExtension.lowercased() == "flv" {
             startCompatibility(episode, headers: headers, token: token); return
         }
         loadAsset(url, headers: headers, position: position, token: token, fallback: isLive ? episode : nil, resumePaused: resumePaused)
+    }
+    private func loadVLC(_ url: URL, headers: [String: String], position: Double, token: UUID, resumePaused: Bool) {
+        connectingMessage = connectionText("正在通过内置 VLC 连接视频…")
+        let session = VLCPlaybackSession(url: url, headers: headers, drawable: videoSurface.view.prepareVLCView(), position: position, paused: resumePaused, rate: rate, volume: nativeVolume, muted: nativeMuted)
+        nativeSession = session
+        session.onState = { [weak self, weak session] state in
+            guard let self, let session, self.generation == token, self.nativeSession === session else { return }
+            switch state {
+            case .playing, .esAdded:
+                self.markNativeReady(session)
+            case .error:
+                self.handleNativeFailure(token: token)
+            case .ended:
+                if self.currentRequest?.isLive == true || !self.ready || (session.duration <= 0 && session.position < 0.2) {
+                    self.handleNativeFailure(token: token)
+                } else { self.onEnd?() }
+            default: break
+            }
+        }
+        connectionTimeout = Task { @MainActor [weak self] in
+            for _ in 0..<150 {
+                do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+                guard let self, self.generation == token, self.nativeSession === session, !self.ready else { return }
+                self.markNativeReady(session)
+                if self.ready { return }
+            }
+            guard let self, self.generation == token, !self.ready else { return }
+            self.handleNativeFailure(token: token, error: session.player.state == .opening ? URLError(.timedOut) : nil)
+        }
+        session.start()
+    }
+    private func markNativeReady(_ session: VLCPlaybackSession) {
+        // VLC can enter Playing for an HTML/playlist response without opening
+        // a decoder. A real audio or video track is required before hiding the
+        // connection state and cancelling its timeout.
+        guard !ready, nativeSession === session,
+              session.player.hasVideoOut || session.player.numberOfAudioTracks > 0 else { return }
+        ready = true; connectionTimeout?.cancel(); connectionTimeout = nil; onReady?()
+    }
+    private func handleNativeFailure(token: UUID, error: Error? = nil) {
+        guard generation == token, let request = currentRequest else { return }
+        // libVLC has no structured URL/TLS error callback. Retry an initial
+        // connection error once, preserving the route, headers and user state.
+        if !tlsRetryAttempted {
+            let resume = ready ? position : request.position, paused = ready && !playing
+            clearAttempt(); tlsRetryAttempted = true
+            connectingMessage = connectionText("连接未成功，正在自动重试（1/1）…")
+            let retryToken = generation
+            tlsRetryTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(nanoseconds: 700_000_000) } catch { return }
+                guard let self, self.generation == retryToken else { return }
+                self.begin(request.episode, headers: request.headers, position: request.isLive ? 0 : resume, isLive: request.isLive, retryingTLS: true, resumePaused: paused)
+            }
+        } else { finishFailure(PlaybackFailure(error: error)) }
     }
     private func loadAsset(_ url: URL, headers: [String: String], position: Double, token: UUID, fallback: Episode?, resumePaused: Bool = false) {
         connectionTimeout?.cancel()
@@ -158,6 +278,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                 self.finishFailure(PlaybackFailure(error: URLError(.timedOut)))
             }
         }
+        player.volume = Float(nativeVolume); player.isMuted = nativeMuted
         let asset = AVURLAsset(url: url, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
         let item = AVPlayerItem(asset: asset)
         if usingCompatibility { item.preferredForwardBufferDuration = 3 }
@@ -167,10 +288,18 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                 if item.status == .failed { self.handleFailure(item.error, item: item, fallback: fallback, headers: headers) }
                 if item.status == .readyToPlay {
                     self.connectionTimeout?.cancel(); self.connectionTimeout = nil
-                    self.ready = true
-                    if position.isFinite && position > 0 { self.player.seek(to: CMTime(seconds: position, preferredTimescale: 600)) }
-                    if resumePaused { self.player.pause() } else { self.player.playImmediately(atRate: self.rate) }
-                    self.onReady?()
+                    let finish: () -> Void = { [weak self, weak item] in
+                        guard let self, self.generation == token, self.player.currentItem === item else { return }
+                        self.ready = true
+                        if resumePaused { self.player.pause() } else { self.player.playImmediately(atRate: self.rate) }
+                        self.onReady?()
+                        if self.pendingPiP { self.pendingPiP = false; self.videoSurface.requestPictureInPicture() }
+                    }
+                    if position.isFinite && position > 0 {
+                        self.player.seek(to: CMTime(seconds: position, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                            Task { @MainActor in finish() }
+                        }
+                    } else { finish() }
                 }
             }
         }
@@ -269,9 +398,13 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     }
     func stop() {
         livePlan = nil; liveHeaders = [:]; onLiveRoute = nil
+        pendingPiP = false
         clearAttempt()
+        systemPlayback = false; storedVideoSurface?.setSystemPlayback(false)
     }
     private func clearAttempt() {
+        nativeSeekTask?.cancel(); nativeSeekTask = nil
+        nativeSession?.stop(); nativeSession = nil
         pendingKeyboardSeek = nil; keyboardSeekGeneration = UUID()
         generation = UUID(); compatibilityTask?.cancel(); compatibilityTask = nil
         tlsRetryTask?.cancel(); tlsRetryTask = nil; currentRequest = nil; tlsRetryAttempted = false
@@ -282,23 +415,22 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         player.pause(); clearAsset()
         player.replaceCurrentItem(with: nil); ready = false
     }
-    func setRate(_ value: Float) { rate = value; if player.rate != 0 { player.rate = value } }
+    func setRate(_ value: Float) { rate = value; if systemPlayback { if player.rate != 0 { player.rate = value } } else { nativeSession?.setRate(value) } }
     @discardableResult func seekRelative(by seconds: Double) -> Bool {
-        guard ready, livePlan == nil, seconds.isFinite, let item = player.currentItem else { return false }
-        let duration = item.duration.seconds, position = player.currentTime().seconds
-        guard duration.isFinite, duration > 0, position.isFinite else { return false }
+        guard ready, livePlan == nil, currentRequest?.isLive != true, seconds.isFinite, duration > 0 else { return false }
         let target = min(max(0, (pendingKeyboardSeek ?? position) + seconds), duration)
         pendingKeyboardSeek = target
-        let token = UUID(); keyboardSeekGeneration = token
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] _ in
-            Task { @MainActor in
-                guard let self, self.keyboardSeekGeneration == token, self.player.currentItem === item else { return }
-                self.pendingKeyboardSeek = nil
-            }
+        nativeSeekTask?.cancel()
+        let token = generation
+        nativeSeekTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 80_000_000) } catch { return }
+            guard let self, self.generation == token else { return }
+            self.seek(to: target)
         }
         return true
     }
     deinit {
+        clockTask?.cancel(); nativeSeekTask?.cancel()
         if let timeToken { player.removeTimeObserver(timeToken) }
         if let endToken { NotificationCenter.default.removeObserver(endToken) }
         if let failToken { NotificationCenter.default.removeObserver(failToken) }
@@ -506,15 +638,77 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         if live { sourceLibrary.renameLive(id, name: name) } else { sourceLibrary.renameVOD(id, name: name) }
         persistLibrary()
     }
+    func sourceAddress(_ id: String, live: Bool) -> String? {
+        if live { return liveSources.first { $0.id == id }.map { $0.feedURL ?? $0.configuration.location } }
+        return vodSources.first { $0.id == id }?.configuration.location
+    }
+    func copySourceAddress(_ id: String, live: Bool, pasteboard: NSPasteboard = .general) {
+        guard let address = sourceAddress(id, live: live), !address.isEmpty else { return }
+        pasteboard.clearContents()
+        pasteboard.setString(address, forType: .string)
+    }
+    func updateSource(_ id: String, live: Bool, name: String, address: String) async throws {
+        guard !refreshingSources.contains(id) else { throw TVError.message("这个源正在刷新，请稍后再修改。") }
+        let oldVOD = vodSources.first { $0.id == id }
+        let oldLive = liveSources.first { $0.id == id }
+        guard let originalAddress = sourceAddress(id, live: live) else { throw TVError.message("这个源已被移除，请重新打开配置管理。") }
+        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { throw TVError.message("请输入源名称。") }
+        let text = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: text), ["http", "https", "file"].contains(url.scheme?.lowercased() ?? ""),
+              url.isFileURL || !(url.host ?? "").isEmpty else {
+            throw TVError.message("请输入完整的 http://、https:// 或本地 file:// 地址。")
+        }
+        try Task.checkCancellation()
+        // A name-only edit works offline and never interrupts playback.
+        if url.absoluteString == originalAddress {
+            renameSource(id, name: label, live: live); return
+        }
+        refreshingSources.insert(id)
+        defer { refreshingSources.remove(id) }
+        let config: Configuration
+        if live, var feed = oldLive?.feeds.first {
+            // An individual subscription keeps its UA, authorization and EPG
+            // defaults. Validate the replacement before touching saved state.
+            feed.url = url.absoluteString; feed.name = label
+            _ = try await service.channels(feed: feed)
+            config = Configuration(name: label, location: url.absoluteString, feeds: [feed])
+        } else { config = try await service.configuration(at: url) }
+        try Task.checkCancellation()
+        guard live ? liveSources.first(where: { $0.id == id }) == oldLive : vodSources.first(where: { $0.id == id }) == oldVOD else {
+            throw TVError.message("这个源在验证期间已被修改或移除，请重新打开后再保存。")
+        }
+        if live { try sourceLibrary.replaceLive(id, configuration: config, name: label) }
+        else { try sourceLibrary.replaceVOD(id, configuration: config, name: label) }
+        persistLibrary()
+        if live {
+            channelCache.removeValue(forKey: id); cacheOrder.removeAll { $0 == id }
+            if sourceLibrary.selectedLiveID == id {
+                if playback?.isLive == true { stop() }
+                liveBrowser.reset(); liveNavigation = []; refreshLive()
+            }
+        } else if sourceLibrary.selectedVODID == id {
+            if playback?.isLive == false { stop() }
+            siteID = sourceLibrary.activeVOD?.selectedSiteID ?? ""; category = ""; query = ""; submittedQuery = ""; refresh()
+        }
+    }
     func refreshSource(_ id: String, live: Bool) async {
         let origin = live ? liveSources.first(where: { $0.id == id })?.origin : vodSources.first(where: { $0.id == id })?.origin
         guard let origin, let url = URL(string: origin), ["http", "https", "file"].contains(url.scheme ?? "") else { alert = "此源没有可刷新的配置地址。"; return }
-        guard !refreshingSources.contains(id) else { return }; refreshingSources.insert(id)
-        defer { refreshingSources.remove(id) }
+        let oldVOD = vodSources.first { $0.id == id }
+        let oldLive = liveSources.first { $0.id == id }
+        let affectedIDs = Set(live ? liveSources.filter { $0.origin == origin }.map(\.id) : vodSources.filter { $0.origin == origin }.map(\.id))
+        guard refreshingSources.isDisjoint(with: affectedIDs) else { return }
+        refreshingSources.formUnion(affectedIDs)
+        defer { refreshingSources.subtract(affectedIDs) }
         do {
-            let config = try await service.configuration(at: url)
+            let config: Configuration
+            if live, let saved = oldLive, let feed = saved.feeds.first, feed.url == origin {
+                _ = try await service.channels(feed: feed)
+                config = Configuration(name: saved.configuration.name, location: origin, feeds: [feed])
+            } else { config = try await service.configuration(at: url) }
             // A source removed while its refresh was running must stay removed.
-            guard live ? liveSources.contains(where: { $0.id == id }) : vodSources.contains(where: { $0.id == id }) else { return }
+            guard live ? liveSources.first(where: { $0.id == id }) == oldLive : vodSources.first(where: { $0.id == id }) == oldVOD else { return }
             let activeOrigin = live ? selectedLiveSource?.origin : selectedVODSource?.origin
             _ = try sourceLibrary.add(config, target: live ? .live : .vod, activate: false)
             persistLibrary()
@@ -596,7 +790,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         playback = Playback(video: Video(id: channel.id, title: channel.name, note: "节目回看"), site: nil, line: line, index: 0, headers: channel.headers, isLive: true, catchupProgramme: programme)
         detail = nil
         // A finite catch-up item must not trigger live route retries or history writes.
-        player.play(line.episodes[0], headers: channel.headers, isLive: true)
+        player.play(line.episodes[0], headers: channel.headers)
     }
     func retryPlayback() {
         guard let current = playback else { return }
@@ -637,18 +831,9 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     }
     func saveCurrentPosition() {
         guard let current = playback, !current.isLive else { return }
-        let position = player.player.currentTime().seconds; if position.isFinite { saveProgress(position) }; save(history, key: "history")
+        let position = player.position; if position.isFinite { saveProgress(position) }; save(history, key: "history")
     }
     func stop() { fullscreen.close(); saveCurrentPosition(); player.stopPresentation(); player.stop(); playback = nil }
     func shutdown() { fullscreen.closeImmediately(); networkProbe.cancel(); saveCurrentPosition(); player.stopPresentation(); player.stop(); preferenceWriter.flush() }
-    func openIINA() {
-        guard let current = playback, let original = URL(string: current.episode.url) else { return }
-        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.colliderli.iina") {
-            NSWorkspace.shared.open([original], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-                if let error { Task { @MainActor in self.alert = error.localizedDescription } }
-            }
-            player.player.pause()
-        } else { alert = "尚未安装 IINA。可以复制播放地址，在其他播放器中打开。" }
-    }
     func copyURL() { guard let url = playback?.episode.url else { return }; NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url, forType: .string) }
 }

@@ -1,10 +1,10 @@
 # TVBox for macOS
 
-原生 SwiftUI + AVKit 桌面影视客户端。此工程是独立实现的首版客户端，不是 Android TVBox 的完整兼容移植版。
+原生 SwiftUI + 内置开源 VLC 桌面影视客户端。此工程是独立实现的首版客户端，不是 Android TVBox 的完整兼容移植版。
 
 ## 运行
 
-打开 `dist/Release/TVBox.app` 即可运行，也可将它复制到“应用程序”。当前交付包针对 Apple Silicon，最低 macOS 13。
+打开 `dist/Release/TVBox.app` 即可运行，也可将它复制到“应用程序”。通用包支持 Intel（x86_64）和 Apple Silicon，最低 macOS 13；另提供仅 Intel 的应用包。运行无需安装 IINA、VLC 或 Homebrew。
 
 1. 点击“添加内容源”，填写 TVBox JSON 地址或选择本地 JSON / M3U / TXT 文件；可指定仅添加点播源或仅添加直播源，并填写自定义名称。
 2. 在“发现”选择已保存的点播源，再选择该配置内的接口，浏览分类和搜索，打开详情后选线路和剧集。
@@ -28,17 +28,17 @@
 | `type: 1` JSON 采集接口 | 分类、分页、站内搜索、详情、多线路选集 |
 | `type: 0` XML 采集接口 | 分类、分页、站内搜索、详情、CDATA 及多线路 |
 | M3U、TXT `#genre#` 直播列表 | 分组、台标、多地址内嵌频道、常见 UA / Referer 请求头 |
-| HLS / MP4、HTTP 视频直链、本地视频 | 由系统 AVKit 解码；具体格式以系统能力为准 |
-| HTTP-FLV 直播兼容 | 自动将 H.264 / HEVC 视频和兼容音频在本机直接封装为 HLS，不重新编码 |
+| HLS / MP4 / MKV / FLV / MPEG-TS、HTTP 视频直链、本地视频 | 默认由应用内置 VLC 解码，启用可用的硬件解码 |
+| HTTP-FLV 直播 | VLC 直接解码；系统投屏或自定义鉴权兼容通道仍可使用本机 HLS 封装 |
 | 收藏、历史、断点续播、自动下一集 | 本机保存，历史最多 100 项 |
 | 多个点播源和多个直播源 | 两份列表分别管理和选择；重启后恢复选择，每个点播源记住接口 |
 | 批量网络探测 | 点播接口、直播订阅、子配置；HTTP 状态、耗时、错误分类、并发、取消及失败项重测 |
 | 全屏、画中画、倍速 | 直播 / 点播统一全屏按钮、双击、Control + Command + F；Esc 返回，画中画与倍速保留 |
-| IINA 打开、复制地址 | 使用本机已安装的 IINA；鉴权头不会传给外部播放器 |
+| 独立播放器、复制地址 | 内置 VideoLAN VLCKit 3.7.3；已移除外部 IINA 打开入口 |
 | 播放错误诊断 | 中文区分 TLS、证书、网络、鉴权和失效地址；错误详情不含 URL 或凭据 |
 | Android JAR / CSP、JS / Python 爬虫 | **未支持**，明确标记为“待适配” |
 | `type: 4` 远程爬虫、加密配置 | **未支持** |
-| `parses` 解析、网页嗅探、DRM、EPG、自定义 DNS / hosts | **未支持** |
+| `parses` 解析、网页嗅探、DRM、自定义 DNS / hosts | **未支持** |
 
 仅导入含 JAR / CSP 源的配置时，可以查看配置及兼容状态，无法执行这些源。不能保证任意网上的 TVBox 地址均可使用。搜索限当前影视源。
 
@@ -60,15 +60,55 @@
 
 ## 开发
 
-不依赖第三方 Swift 包，安装 Swift 6 及相应 Xcode Command Line Tools 后即可编译：
+源码包附带官方 VLCKit 二进制归档和 FFmpeg 源码。安装 Swift 6 及相应 Xcode Command Line Tools 后，可在 Intel Mac 直接编译：
 
 ```bash
-bash scripts/test.sh
-swift run TVBoxMac
 bash scripts/build-app.sh
+# Intel Mac 上默认生成 Intel 应用，也可显式指定：
+bash scripts/build-app.sh intel
+# 生成同时支持 Intel 和 Apple Silicon 的通用包：
+bash scripts/build-app.sh --universal
+bash scripts/test.sh
 ```
 
-`build-app.sh` 生成 `.app`、应用图标、ad hoc 本机签名及 ZIP，同时调用 `build-remux.sh` 从随源码包附带的官方 FFmpeg 源码构建独立兼容工具。当前构建针对 arm64 / macOS 13；发布 Intel 包需扩展构建架构。没有 Apple Developer 分发签名和公证，跨机器分发前需要用自己的开发者身份签名、公证。
+`build-app.sh` 生成 `.app`、应用图标、ad hoc 本机签名及 ZIP，同时调用 `build-remux.sh` 从随源码包附带的官方 FFmpeg 源码构建独立兼容工具。默认按本机架构构建，intel 指定 x86_64，--universal 分别编译 arm64 / x86_64 后合并；最低 macOS 13。内置 VLC、应用和直播辅助工具均检查目标架构、非系统外部依赖与完整签名。没有 Apple Developer 分发签名和公证，跨机器分发前需要用自己的开发者身份签名、公证。
+
+### GitHub Actions 自动编译与发布
+
+工作流文件：.github/workflows/macos-build.yml。将 Source 目录内的项目文件（包括隐藏的 .github 目录）放在 GitHub 仓库根目录；Package.swift 必须和 .github 同级。不要把 TVBox.app 或源码 ZIP 当成仓库源码上传。
+
+| 版本 | GitHub 运行机 | 编译架构 | 产物 |
+| --- | --- | --- | --- |
+| Intel | macos-15-intel | 本机 x86_64 | TVBox-macOS-Intel.zip |
+| Apple Silicon | macos-15 | 本机 arm64 | TVBox-macOS-AppleSilicon.zip |
+
+每个运行机会先检查自身架构，校验官方依赖，运行 Core 测试，再编译应用和直播辅助工具、检查播放内核架构、执行 ad hoc 签名、验证 ZIP，并生成 SHA-256 文件。GitHub 当前的 Intel 与 ARM 标签见 [官方运行机文档](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job)。Actions 固定到已核验的提交版本。
+
+推送 main / master 或提交 PR 会自动编译；也可打开仓库 Actions → Build macOS → Run workflow 手动运行。完成后在该次运行底部 Artifacts 下载 Intel 或 Apple Silicon 包，保留 14 天。工作流不合成 Universal 包，本机构建通用版仍可用 build-app.sh --universal。
+
+首次上传到自己新建的空仓库，在 Source 目录执行（替换自己的仓库地址）：
+
+```bash
+git init
+git add .
+git commit -m "Add TVBox with macOS build workflow"
+git branch -M main
+git remote add origin https://github.com/YOUR_NAME/TVBoxMac.git
+git push -u origin main
+```
+
+VLC 的大归档已加入 .gitignore。缺少归档时脚本从 VideoLAN 官方地址下载固定版本，并验证 SHA-256；源码交付 ZIP 继续包含离线归档。FFmpeg 归档也会校验，缺失时从官方地址下载。Actions 缓存只保存这两份已校验归档，不依赖本机 Vendor 或 .build 缓存。
+
+发布版本时先修改 Resources/Info.plist 的 CFBundleShortVersionString 与 CFBundleVersion，提交并推送。Tag 必须等于 v + CFBundleShortVersionString，例如当前版本：
+
+```bash
+git tag v0.7.1
+git push origin v0.7.1
+```
+
+两种架构全部成功后，工作流使用 GitHub 自动提供的 GITHUB_TOKEN 创建 Release，附上两个安装 ZIP 及 SHA-256。重新运行同一 Tag 会更新对应附件；无需额外配置个人访问令牌。Release 任务单独申请 contents: write；仓库或组织若限制此权限，需要允许该任务写入 Releases。普通 PR 构建保持只读权限。
+
+当前产物沿用本机 ad hoc 签名，没有 Apple Developer 分发签名与公证；如需公证分发，应另外配置开发者证书与 notarytool 凭据。本工作流尚未在你的 GitHub 仓库实际执行，首轮运行结果以 Actions 日志为准。
 
 ### 本地端到端验证
 
@@ -92,7 +132,27 @@ python3 scripts/fixture-server.py
 
 0.4.3 在配置管理的“直播源”标题旁加入排序选择，默认“时延从低到高”，也可返回“原始顺序”。正常响应的直播源按最新探测耗时排列，失败、未测及取消项放后，同耗时保持配置顺序。直播页的源选择器同步排序并显示正常项的 `【123ms】`。排序只影响展示，不修改已保存的源顺序或当前选择；排序偏好会保留到下次启动。
 
-## 数据与结构
+## 0.7.1 源复制与修改
+
+配置管理中的点播源与直播源均提供复制按钮，也可在行末菜单选择“复制地址”或“修改名称 / 地址”。复制完整地址，保留鉴权查询参数；列表展示仍隐藏查询参数与用户信息。编辑名称和地址后点击“保存修改”：名称单独修改无需联网，新地址会先校验，再原位替换，不追加副本，不改变源 ID、当前选择、收藏或历史的作用域。修改非当前源不会切换当前源。
+
+失败、取消、类型不匹配或与已有地址重复时保留原数据；验证期间源被移除或另有更新时，不提交过期结果。修改已选源地址会刷新对应片库 / 频道；仅改名不中断播放。单个直播订阅保留原请求头与节目单默认信息，并继续支持探测与刷新。一个地址返回多个直播来源时，使用“添加直播源”导入，或直接填写其中一个订阅地址。
+
+源管理保存 / 取消的隔离验证：启动 scripts/fixture-server.py，运行 python3 scripts/check-source-edit.py。使用独立偏好域和独立测试剪贴板，不改动正式源或用户剪贴板。
+
+## 0.7.0 独立播放与 Intel
+
+普通播放由应用自己的 VLCKit.framework 提供，不调用外部播放器，也不读取本机 IINA 的库或设置。FLV、MKV 与 MPEG-TS 由 VLC 直接播放；新频道使用独立渲染视图，旧输入的异步停止不能移除新频道画面。全屏在窗口之间移动当前容器和渲染视图，不重新连接片源。暂停状态下连续方向键仍按每次 3 秒累积；VLC 暂停时不立即更新底层时间通知，因此控制条先显示已请求的位置，在解码器确认后同步实际进度。
+
+UA / Referer 传给 VLC；Cookie、Authorization 和其他自定义 HTTP 请求头使用系统兼容通道，避免静默丢失鉴权。打开 AirPlay 菜单或画中画时也切换系统播放通道，点播保留进度、暂停、倍速、音量；控制条中的“返回 VLC”可恢复内置播放。带特殊鉴权头的地址仍需兼容通道。电视端播放能力取决于接收设备和片源，未在实际电视上验证。
+
+VLC 初始连接失败会自动重试一次，再失败尝试同频道备用线路。必须检测到实际音视频轨道才算连接成功；HTML / 错误网页不能提前取消连接超时。普通播放不再生成本机转封装视频缓存；配置、收藏与历史沿用原存储。
+
+当前播放回归使用 scripts/check-vlc-playback.py，分别传入 arm64 / x86_64。测试素材为本机生成的 test.mp4、test.flv、test.mkv、test-mpeg2.ts，放在 .build 中，并启动 scripts/fixture-server.py。Intel 测试在 Apple Silicon 上可通过已安装的 Rosetta 执行 x86_64 二进制；这不能代替 Intel 物理硬件和显卡上的测试。旧版 check-fullscreen.swift / check-tls-retry.swift 保留为系统 AVPlayer 通道的历史测试参考，默认 VLC 的验证结果见 VALIDATION.md。
+
+## 数据与结构（以下为历史版本说明）
+
+0.6.5 修复影片卡片海报重叠：卡片容器统一保持 0.70 宽高比，海报在容器实际尺寸内按比例填充并裁剪；横版、超宽、超长图片不再以自身比例撑大网格单元。加载占位与成功图片共用尺寸，影片标题和副标题跟随列宽。发现、收藏、播放历史共用此卡片，详情页海报继续使用原有固定尺寸。
 
 0.6.4 将左右方向键的每步跳转改为 3 秒；连按累积跳转目标，长按接受系统重复按键事件，向前 / 向后均可连续调整。边界、焦点保护、暂停状态与倍速保持沿用 0.6.3 的逻辑。
 
@@ -134,7 +194,7 @@ M3U 回看支持明确的 `catchup="default" / "append" / "shift"`、`catchup-so
 
 ```
 Sources/TVBoxCore/     配置、影视/直播模型、JSON/XML/M3U 解析与网络接口
-Sources/TVBoxMac/      SwiftUI 界面、持久化状态、AVKit 播放器
+Sources/TVBoxMac/      SwiftUI 界面、持久化状态、VLC / 系统投屏通道
 Tests/TVBoxCoreTests/  解析与网络行为测试
 Examples/             配置模板（需替换 example.com 占位地址）
 Resources/            App Info.plist

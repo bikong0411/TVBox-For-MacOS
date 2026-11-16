@@ -1,10 +1,12 @@
 import SwiftUI
+import AppKit
 import TVBoxCore
 
 private struct SourceAction: Identifiable {
     var id: String
     var name: String
     var live: Bool
+    var address: String = ""
 }
 
 struct SourcesView: View {
@@ -12,6 +14,7 @@ struct SourcesView: View {
     @ObservedObject var probe: NetworkProbeModel
     @ObservedObject var browser: LiveBrowserState
     @State private var removal: SourceAction?
+    @State private var editing: SourceAction?
     @State private var rename: SourceAction?
     @State private var editedName = ""
     @State private var loadingSubscription: String?
@@ -40,7 +43,7 @@ struct SourcesView: View {
                 activeVODDetails
                 activeLiveDetails
                 compatibility
-                Text("TVBox for macOS · 0.6.4 · 原生 SwiftUI / AVPlayer").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                Text("TVBox for macOS · 0.7.1 · 内置 VLC · Intel / Apple Silicon").font(.system(size: 10)).foregroundStyle(Theme.muted)
             }.padding(32)
         }
         .confirmationDialog("移除这个源？收藏和播放记录会保留。", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
@@ -49,6 +52,7 @@ struct SourcesView: View {
             }
             Button("取消", role: .cancel) { removal = nil }
         }
+        .sheet(item: $editing) { SourceEditorView(source: $0).environmentObject(store) }
         .alert("重命名来源", isPresented: Binding(get: { rename != nil }, set: { if !$0 { rename = nil } })) {
             TextField("源名称", text: $editedName)
             Button("保存") { if let item = rename { store.renameSource(item.id, name: editedName, live: item.live) }; rename = nil }
@@ -64,7 +68,7 @@ struct SourcesView: View {
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(store.vodSources) { source in
-                        SourceRow(name: source.name, location: source.configuration.location, detail: "\(source.configuration.sites.count) 个接口 · \(source.configuration.sites.filter(\.supported).count) 个兼容", active: source.id == store.sourceLibrary.selectedVODID, loading: store.refreshingSources.contains(source.id), select: { store.selectVODSource(source.id) }, refresh: { Task { await store.refreshSource(source.id, live: false) } }, rename: { beginRename(source.id, name: source.name, live: false) }, remove: { removal = SourceAction(id: source.id, name: source.name, live: false) })
+                        SourceRow(name: source.name, location: source.configuration.location, detail: "\(source.configuration.sites.count) 个接口 · \(source.configuration.sites.filter(\.supported).count) 个兼容", active: source.id == store.sourceLibrary.selectedVODID, loading: store.refreshingSources.contains(source.id), select: { store.selectVODSource(source.id) }, refresh: { Task { await store.refreshSource(source.id, live: false) } }, rename: { beginRename(source.id, name: source.name, live: false) }, copy: { store.copySourceAddress(source.id, live: false) }, edit: { beginEditing(source.id, name: source.name, live: false) }, remove: { removal = SourceAction(id: source.id, name: source.name, live: false) })
                         if source.id != store.vodSources.last?.id { rowDivider }
                     }
                 }.background(Theme.panel, in: RoundedRectangle(cornerRadius: 11))
@@ -89,7 +93,7 @@ struct SourcesView: View {
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(sources) { source in
-                        SourceRow(name: source.name, location: source.feedURL ?? source.configuration.location, detail: liveDetail(source), active: source.id == store.sourceLibrary.selectedLiveID, loading: store.refreshingSources.contains(source.id), select: { store.selectLiveSource(source.id) }, refresh: { Task { await store.refreshSource(source.id, live: true) } }, rename: { beginRename(source.id, name: source.name, live: true) }, remove: { removal = SourceAction(id: source.id, name: source.name, live: true) }, probeResult: probe.liveResult(source))
+                        SourceRow(name: source.name, location: source.feedURL ?? source.configuration.location, detail: liveDetail(source), active: source.id == store.sourceLibrary.selectedLiveID, loading: store.refreshingSources.contains(source.id), select: { store.selectLiveSource(source.id) }, refresh: { Task { await store.refreshSource(source.id, live: true) } }, rename: { beginRename(source.id, name: source.name, live: true) }, copy: { store.copySourceAddress(source.id, live: true) }, edit: { beginEditing(source.id, name: source.name, live: true) }, remove: { removal = SourceAction(id: source.id, name: source.name, live: true) }, probeResult: probe.liveResult(source))
                         if source.id != sources.last?.id { rowDivider }
                     }
                 }.background(Theme.panel, in: RoundedRectangle(cornerRadius: 11))
@@ -147,7 +151,7 @@ struct SourcesView: View {
     private var compatibility: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("兼容说明").font(.system(size: 14, weight: .semibold))
-            Text("点播支持 type 0 XML / type 1 JSON 接口；直播支持 M3U / TXT 列表与 TVBox lives。支持图片前缀 + Base64 配置；一个配置内的多个直播订阅会分别保存，可逐个选择。\n\n暂未支持 Android JAR / CSP、JS / Python 爬虫、type 4 远程爬虫、AES / 密码加密配置、网页嗅探、parses 解析服务和 EPG。\n\n同一地址再次导入会更新已保存的源。旧版单份配置会自动迁移，收藏和播放记录保留。")
+            Text("点播支持 type 0 XML / type 1 JSON 接口；直播支持 M3U / TXT 列表与 TVBox lives。支持图片前缀 + Base64 配置；一个配置内的多个直播订阅会分别保存，可逐个选择。\n\n暂未支持 Android JAR / CSP、JS / Python 爬虫、type 4 远程爬虫、AES / 密码加密配置、网页嗅探和 parses 解析服务。\n\n同一地址再次导入会更新已保存的源。旧版单份配置会自动迁移，收藏和播放记录保留。")
                 .font(.system(size: 12)).foregroundStyle(Theme.muted).lineSpacing(5)
         }.padding(22).frame(maxWidth: .infinity, alignment: .leading).overlay(RoundedRectangle(cornerRadius: 11).stroke(Theme.line))
     }
@@ -164,6 +168,9 @@ struct SourcesView: View {
     private func liveDetail(_ source: SavedLiveSource) -> String {
         if !source.subscriptions.isEmpty { return "\(source.subscriptions.count) 个子配置" }
         return source.feedURL == nil ? "\(source.channels.count) 个频道" : "直播订阅列表"
+    }
+    private func beginEditing(_ id: String, name: String, live: Bool) {
+        editing = SourceAction(id: id, name: name, live: live, address: store.sourceAddress(id, live: live) ?? "")
     }
     private func beginRename(_ id: String, name: String, live: Bool) { editedName = name; rename = SourceAction(id: id, name: name, live: live) }
     private func subscriptionList(_ subscriptions: [Subscription], title: String, target: SourceImportTarget) -> some View {
@@ -194,6 +201,65 @@ struct SourcesView: View {
     }
 }
 
+private struct SourceEditorView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) var dismiss
+    let source: SourceAction
+    @State private var name: String
+    @State private var address: String
+    @State private var saving = false
+    @State private var error: String?
+    @State private var saveTask: Task<Void, Never>?
+    init(source: SourceAction) {
+        self.source = source
+        _name = State(initialValue: source.name); _address = State(initialValue: source.address)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Text(source.live ? "修改直播源" : "修改点播源").font(.system(size: 24, weight: .semibold))
+                Spacer()
+                Button(action: cancel) { Image(systemName: "xmark") }.buttonStyle(.plain).help("取消修改")
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("源名称").font(.system(size: 12, weight: .medium))
+                TextField("源名称", text: $name).textFieldStyle(.roundedBorder).disabled(saving)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(source.live ? "直播源地址" : "配置地址").font(.system(size: 12, weight: .medium))
+                TextField("https://example.com/" + (source.live ? "live.m3u" : "tvbox.json"), text: $address)
+                    .textFieldStyle(.plain).font(.system(size: 12, design: .monospaced))
+                    .padding(13).background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+                    .disabled(saving).onSubmit(save)
+            }
+            Text("只修改名称无需联网。修改地址会先验证内容，成功后替换当前源；其他源和所选源保持不变。")
+                .font(.system(size: 11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            if let error { ErrorBanner(message: error) }
+            HStack {
+                Button("取消", action: cancel).keyboardShortcut(.cancelAction)
+                Spacer()
+                if saving { ProgressView().controlSize(.small) }
+                Button(saving ? "正在验证…" : "保存修改", action: save)
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(30).frame(width: 540).background(Theme.background).tint(Theme.accent)
+            .interactiveDismissDisabled(saving).onDisappear { saveTask?.cancel() }
+    }
+    private func cancel() { saveTask?.cancel(); dismiss() }
+    private func save() {
+        guard !saving else { return }; saving = true; error = nil
+        saveTask = Task { @MainActor in
+            do {
+                try await store.updateSource(source.id, live: source.live, name: name, address: address)
+                if !Task.isCancelled { dismiss() }
+            } catch is CancellationError {}
+            catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+            saving = false
+        }
+    }
+}
+
 private struct SourceRow: View {
     let name: String
     let location: String
@@ -203,8 +269,12 @@ private struct SourceRow: View {
     let select: () -> Void
     let refresh: () -> Void
     let rename: () -> Void
+    let copy: () -> Void
+    let edit: () -> Void
     let remove: () -> Void
     var probeResult: ProbeResult? = nil
+    @State private var copied = false
+    @State private var copyReset: Task<Void, Never>?
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: active ? "checkmark.circle.fill" : "circle").font(.system(size: 17)).foregroundStyle(active ? Theme.accent : Theme.muted.opacity(0.4))
@@ -221,13 +291,28 @@ private struct SourceRow: View {
             if loading { ProgressView().controlSize(.small) }
             if active { Text("使用中").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 54) }
             else { Button("选择", action: select).font(.system(size: 11)).frame(width: 54) }
+            Button(action: copyAddress) { Image(systemName: copied ? "checkmark" : "doc.on.doc").frame(width: 20, height: 24) }
+                .buttonStyle(.plain).foregroundStyle(copied ? Theme.accent : Theme.muted)
+                .disabled(location.isEmpty).help(copied ? "已复制源地址" : "复制源地址").accessibilityLabel("复制源地址")
+            Button(action: edit) { Image(systemName: "square.and.pencil").frame(width: 20, height: 24) }
+                .buttonStyle(.plain).foregroundStyle(Theme.muted).disabled(loading)
+                .help("修改源名称 / 地址").accessibilityLabel("修改源")
             Menu {
+                Button("复制地址", action: copyAddress).disabled(location.isEmpty)
+                Button("修改名称 / 地址", action: edit).disabled(loading)
                 Button("刷新源", action: refresh).disabled(loading)
-                Button("重命名", action: rename)
+                Button("重命名", action: rename).disabled(loading)
                 Divider()
                 Button("移除", role: .destructive, action: remove)
             } label: { Image(systemName: "ellipsis") }.frame(width: 38).accessibilityLabel("管理\(name)")
-        }.padding(18)
+        }.padding(18).onDisappear { copyReset?.cancel() }
+    }
+    private func copyAddress() {
+        copy(); copied = true; copyReset?.cancel()
+        copyReset = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            copied = false
+        }
     }
     private var displayLocation: String {
         guard var components = URLComponents(string: location) else { return location }

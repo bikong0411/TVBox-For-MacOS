@@ -172,7 +172,7 @@ private struct PlayerContent: View {
                         }
                         Menu { ForEach([Float(0.5), 1, 1.25, 1.5, 2], id: \.self) { rate in Button("\(String(format: "%g", rate))×") { controller.setRate(rate) } } } label: { Text("\(String(format: "%g", controller.rate))×") }.frame(width: 70)
                         Button { store.toggleFavorite(current.video, site: current.site) } label: { Image(systemName: store.isFavorite(current.video, site: current.site) ? "heart.fill" : "heart") }.disabled(current.isLive)
-                        Menu { Button("使用 IINA 打开") { store.openIINA() }; Button("复制播放地址") { store.copyURL() } } label: { Image(systemName: "ellipsis") }.frame(width: 45)
+                        Menu { Button("复制播放地址") { store.copyURL() } } label: { Image(systemName: "ellipsis") }.frame(width: 45)
                     }
                     if current.line.episodes.count > 1 {
                         HStack { Text(current.isLive ? "切换线路" : "剧集").font(.system(size: 15, weight: .semibold)); Spacer(); if !current.isLive { Button("下一集") { store.nextEpisode() }.disabled(current.index + 1 >= current.line.episodes.count) } }
@@ -221,7 +221,7 @@ struct PlaybackSurface: View {
                         HStack {
                             Button(current.isLive && current.line.episodes.count > 1 ? "重试全部线路" : "重试") { store.retryPlayback() }
                             if current.isLive && current.line.episodes.count > 1 { Button("下一条线路") { store.nextLiveRoute() } }
-                            Button("使用 IINA") { store.openIINA() }; Button("复制地址") { store.copyURL() }
+                            Button("复制地址") { store.copyURL() }
                         }
                         if current.isLive {
                             Button("刷新直播列表") { store.stop(); store.section = .live; store.refreshLive() }.font(.system(size: 12))
