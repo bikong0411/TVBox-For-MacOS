@@ -32,15 +32,21 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:list(pool.map(
 (root/'tools/libraries/manifest.json').write_text(json.dumps(libraries,indent=2)+'\n')
 (root/'tools/gvproxy').chmod(0o755)
 
-def extract(archive, target):
+def extract(archive, target, *, omit_symlink=None):
     target.mkdir(parents=True,exist_ok=True)
     with tarfile.open(archive) as source:
+        members = []
         for member in source:
             if member.name.startswith('/') or '..' in PurePosixPath(member.name).parts:raise RuntimeError('Archive path escapes build directory')
+            if member.issym() and (member.name, member.linkname) == omit_symlink:
+                continue
             if member.issym() or member.islnk():
-                link=posixpath.normpath(posixpath.join(posixpath.dirname(member.name),member.linkname))
-                if member.linkname.startswith('/') or link=='..' or link.startswith('../'):raise RuntimeError('Archive link escapes build directory')
-        source.extractall(target)
+                base = posixpath.dirname(member.name) if member.issym() else ''
+                link = posixpath.normpath(posixpath.join(base, member.linkname))
+                if member.linkname.startswith('/') or link == '..' or link.startswith('../'):
+                    raise RuntimeError(f'Archive link escapes build directory: {archive.name}: {member.name!r} -> {member.linkname!r}')
+            members.append(member)
+        source.extractall(target, members=members)
 
 def deb_files(archive,target,predicate):
     members=subprocess.check_output(['ar','-t',str(archive)],text=True).splitlines()
@@ -64,9 +70,13 @@ if not (root/'busybox').exists():
 
 source=root/'qemu-source/qemu-darwin-arm64-v0.1.0-sources'
 if not source.exists():extract(root/'qemu-sources.tar',root/'qemu-source')
+# The pinned QEMU tarball ships an EDK II host-emulator link to XQuartz.
+# Our QEMU build never builds the EDK II host emulator.
+x11_link = ('qemu-10.2.4/roms/edk2/EmulatorPkg/Unix/Host/X11IncludeHack', '/opt/X11/include')
 for name,expected in [('qemu-10.2.4.tar.xz','821b545b92f165e57dddccac5077d76d4d436a226595b8813ad59306bbfd0746'),('glib-2.88.4.tar.xz','25fd169f3b2f91fe2391ad297883ce0fcf30c69fc789ffd1c9672d1332b1c5a8')]:
     assert sha(source/name)==expected
-    if not (source/'src'/name.split('.tar')[0]).exists():extract(source/name,source/'src')
+    if not (source/'src'/name.split('.tar')[0]).exists():
+        extract(source/name, source/'src', omit_symlink=x11_link if name == 'qemu-10.2.4.tar.xz' else None)
 cache=source/'src/glib-2.88.4/subprojects/packagecache';cache.mkdir(exist_ok=True)
 for path in (source/'glib-subprojects').iterdir():shutil.copy2(path,cache/path.name)
 if not (source/'dtc-extracted/dtc/libfdt').exists():extract(source/'qemu-subproject-dtc.tar.gz',source/'dtc-extracted')
