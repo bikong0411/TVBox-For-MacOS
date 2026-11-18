@@ -2,9 +2,7 @@ name: Build macOS
 
 "on":
   push:
-    branches: [main, master]
     tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -18,7 +16,7 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +42,30 @@ jobs:
           test "$(uname -m)" = "$EXPECTED_ARCH"
           xcode-select -p
           swift --version
-          python3 scripts/ci-version.py
+
+      - name: Verify workflow consistency
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          workflows = Path('.github/workflows')
+          builders = sorted(p.name for p in workflows.iterdir()
+                            if p.suffix in ['.yml', '.yaml'] and
+                            ('scripts/build-app.sh' in p.read_text() or 'gh release create' in p.read_text()))
+          if builders != ['main.yml']:
+              raise SystemExit('Keep only .github/workflows/main.yml for app builds; remove the obsolete macos-build.yml. Found: ' + ', '.join(builders))
+          PY
+
+      - name: Verify version stamping
+        run: python3 scripts/check-ci-version.py
+
+      - name: Verify update publishing validation
+        run: python3 scripts/check-update-release.py
+
+      - name: Verify Chinese and English menus
+        run: python3 scripts/check-localization.py
+
+      - name: Set application version from release tag
+        run: python3 scripts/ci-version.py
 
       - name: Cache official playback archives
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -52,10 +73,27 @@ jobs:
           path: |
             ThirdPartySources/VLCKit-3.7.3.tar.xz
             ThirdPartySources/ffmpeg-8.1.1.tar.xz
+            ThirdPartySources/Sparkle-2.10.0.zip
           key: playback-archives-${{ hashFiles('scripts/fetch-dependencies.py') }}
 
       - name: Prepare and verify playback dependencies
-        run: bash scripts/prepare-vlc.sh
+        run: bash scripts/prepare-dependencies.sh
+
+      - name: Install runtime build tools
+        run: brew install e2fsprogs pkgconf
+
+      - name: Cache CSP source and build dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/csp-runtime
+          key: csp-${{ runner.arch }}-${{ hashFiles('scripts/csp/**', 'scripts/prepare-csp-runtime.py', 'scripts/build-csp-worker.py', 'Helpers/CSPWorker/**', 'Helpers/CSPRuntimeHost.swift') }}
+
+      - name: Build standalone CSP runtime
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: |
+          python3 scripts/prepare-csp-runtime.py --arch "$BUILD_ARCH"
+          test -s Vendor/CSPRuntime/manifest.json
 
       - name: Run Core tests
         run: bash scripts/test.sh
@@ -84,19 +122,38 @@ jobs:
           compression-level: 0
           retention-days: 14
 
+      - name: Package runtime corresponding sources
+        if: matrix.arch == 'arm64'
+        run: python3 scripts/csp/package-sources.py
+
+      - name: Upload runtime corresponding sources
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: TVBox-CSP-Sources
+          path: dist/TVBox-CSP-Corresponding-Sources.zip
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     name: Publish tagged release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    runs-on: macos-15
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
+      - name: Check out release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Download successful builds
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: TVBox-macOS-*
+          pattern: TVBox-*
           path: release-assets
           merge-multiple: true
 
@@ -105,14 +162,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
+          test -n "$SPARKLE_PRIVATE_KEY" || { echo "::error::Configure the SPARKLE_PRIVATE_KEY repository secret before publishing signed updates"; exit 1; }
+          python3 scripts/prepare-sparkle.py
+          python3 scripts/create-update-feeds.py --artifacts release-assets --repository "$GH_REPO" --tag "$RELEASE_TAG"
           cd release-assets
           test -s TVBox-macOS-Intel.zip
           test -s TVBox-macOS-AppleSilicon.zip
-          sha256sum --check ./*.sha256
+          shasum -a 256 --check ./*.sha256
+          test -s appcast-Intel.xml
+          test -s appcast-AppleSilicon.xml
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" ./*.zip ./*.sha256 --clobber
+            gh release upload "$RELEASE_TAG" ./appcast-*.xml --clobber
+            gh release edit "$RELEASE_TAG" --draft=false
           else
-            gh release create "$RELEASE_TAG" ./*.zip ./*.sha256 \
-              --verify-tag --title "TVBox $RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" ./*.zip ./*.sha256 ./appcast-*.xml \
+              --draft --verify-tag --title "TVBox $RELEASE_TAG" --generate-notes
+            gh release edit "$RELEASE_TAG" --draft=false
           fi
