@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="local.tvbox.csp">
+    <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="28" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:label="TVBox 爬虫组件" android:allowBackup="false" android:hardwareAccelerated="false" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity android:name=".WorkerActivity" android:exported="true" android:launchMode="singleTask">
+            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+        </activity>
+    </application>
+</manifest>

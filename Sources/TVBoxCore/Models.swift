@@ -7,13 +7,18 @@ public struct Site: Codable, Identifiable, Hashable, Sendable {
     public var api: String
     public var searchable: Bool
     public var headers: [String: String]
+    public var csp: CSPDefinition?
     public var id: String { key }
     public var supported: Bool { [0, 1].contains(type) && URL(string: api)?.host != nil }
+    public var requiresCSP: Bool { type == 3 && csp != nil }
+    /// Selectable describes a recognized protocol, not the availability of an
+    /// upstream service or proof that every method of a third-party spider works.
+    public var selectable: Bool { supported || requiresCSP }
     public var format: String {
-        switch type { case 0: return "XML"; case 1: return "JSON"; case 3: return "爬虫 / JAR"; case 4: return "远程爬虫"; default: return "类型 \(type)" }
+        switch type { case 0: return "XML"; case 1: return "JSON"; case 3: return requiresCSP ? "Java / CSP" : "爬虫 / JAR"; case 4: return "远程爬虫"; default: return "类型 \(type)" }
     }
-    public init(key: String, name: String, type: Int, api: String, searchable: Bool = true, headers: [String: String] = [:]) {
-        self.key = key; self.name = name; self.type = type; self.api = api; self.searchable = searchable; self.headers = headers
+    public init(key: String, name: String, type: Int, api: String, searchable: Bool = true, headers: [String: String] = [:], csp: CSPDefinition? = nil) {
+        self.key = key; self.name = name; self.type = type; self.api = api; self.searchable = searchable; self.headers = headers; self.csp = csp
     }
 }
 

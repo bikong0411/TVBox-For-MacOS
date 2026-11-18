@@ -6,6 +6,9 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
 ARCHIVES = [
+    ("Sparkle-2.10.0.zip",
+     "https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-for-Swift-Package-Manager.zip",
+     "17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959"),
     ("VLCKit-3.7.3.tar.xz",
      "https://download.videolan.org/cocoapods/prod/VLCKit-3.7.3-319ed2c0-79128878.tar.xz",
      "019afdae4e2e2d0f3ac325fac8f7ba0af25dca70b9d157df7d60db88e0be8e5d"),

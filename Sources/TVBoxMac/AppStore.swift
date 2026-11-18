@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 enum Section: String, CaseIterable, Identifiable {
     case discover = "发现", live = "电视直播", favorites = "我的收藏", history = "播放记录", sources = "配置管理", network = "网络探测"
     var id: String { rawValue }
+    var title: String { L10n.string(rawValue) }
     var icon: String {
         switch self { case .discover: return "square.grid.2x2"; case .live: return "tv"; case .favorites: return "heart"; case .history: return "clock.arrow.circlepath"; case .sources: return "slider.horizontal.3"; case .network: return "network" }
     }
@@ -28,19 +29,21 @@ struct Playback {
     var headers: [String: String]
     var isLive: Bool = false
     var catchupProgramme: Programme?
+    var resolvedEpisode: Episode? = nil
+    var cspLease: CSPPlaybackLease? = nil
     var episode: Episode { line.episodes[index] }
 }
 
 enum LiveSourceSort: String, CaseIterable, Identifiable {
     case latency, original
     var id: String { rawValue }
-    var title: String { self == .latency ? "时延从低到高" : "原始顺序" }
+    var title: String { L10n.string(self == .latency ? "时延从低到高" : "原始顺序") }
 }
 
 enum LiveLayout: String, CaseIterable, Identifiable {
     case list, grid
     var id: String { rawValue }
-    var title: String { self == .list ? "列表" : "平铺" }
+    var title: String { L10n.string(self == .list ? "列表" : "平铺") }
     var icon: String { self == .list ? "list.bullet" : "square.grid.2x2" }
 }
 
@@ -78,7 +81,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private(set) var mpvSession: MPVPlaybackSession?
     var preferMPV = false
     @Published private(set) var componentNotice: String?
-    var playbackEngine: String { systemPlayback ? "系统播放" : mpvSession != nil ? "IINA 组件 · mpv" : "内置 VLC" }
+    var playbackEngine: String { L10n.string(systemPlayback ? "系统播放" : mpvSession != nil ? "IINA 组件 · mpv" : "内置 VLC") }
     private var castTask: Task<Void, Never>?
     private var pendingCastDevice: DLNADevice?
     @Published private(set) var systemPlayback = false
@@ -336,6 +339,10 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         let surface = PersistentVideoSurface(player: player); storedVideoSurface = surface; return surface
     }
     func stopPresentation() { storedVideoSurface?.stopPictureInPicture() }
+    func prepareSpiderPlayback() {
+        stopPresentation(); stop(); error = nil; failure = nil
+        connectionStartedAt = Date(); connectingMessage = "正在解析播放地址…"
+    }
     @Published var error: String?
     @Published var failure: PlaybackFailure?
     @Published var ready = false
@@ -843,11 +850,15 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     }
     let player = PlayerController()
     let fullscreen: PlaybackFullscreenPresenter
-    let service = TVService()
+    let service: TVService
+    let cspRuntime: CSPBundledRuntime
     let liveBrowser: LiveBrowserState
     let networkProbe = NetworkProbeModel()
+    let updates = AppUpdateController(enabled: !ProcessInfo.processInfo.arguments.contains("--ui-test"))
     private var catalogTask: Task<Void, Never>?
     private var liveTask: Task<Void, Never>?
+    private var resolutionTask: Task<Void, Never>?
+    private var resolutionID = UUID()
     private var requestID = UUID()
     private var liveRequestID = UUID()
     private var lastSave = Date.distantPast
@@ -867,9 +878,19 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     var isDemo: Bool { sourceLibrary.activeVOD == nil }
     var hasSources: Bool { !vodSources.isEmpty || !liveSources.isEmpty }
     var site: Site? { sourceLibrary.activeVOD?.runtimeSite(siteID) }
-    var supportedSites: [Site] { configuration?.sites.filter(\.supported) ?? [] }
+    var supportedSites: [Site] { configuration?.sites.filter { service.supports($0) } ?? [] }
     init(fullscreen: PlaybackFullscreenPresenter? = nil) {
         self.fullscreen = fullscreen ?? PlaybackFullscreenPresenter()
+        let assets = (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("CSPRuntime", isDirectory: true)
+        let storage: URL
+        if ProcessInfo.processInfo.arguments.contains("--ui-test") {
+            storage = FileManager.default.temporaryDirectory.appendingPathComponent("tvbox-csp-ui-" + UUID().uuidString)
+        } else {
+            storage = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("TVBoxMac/CSPRuntime", isDirectory: true)
+        }
+        let runtime = CSPBundledRuntime(assets: assets, storage: storage)
+        cspRuntime = runtime
+        service = TVService(csp: runtime.available ? CSPRPCTransport(runtime: runtime) : nil)
         // The normal application domain is selected by .standard. Passing the
         // bundle identifier as a suite name can return nil in a packaged app.
         if ProcessInfo.processInfo.arguments.contains("--ui-test") {
@@ -916,28 +937,43 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private func save<T: Encodable & Sendable>(_ value: T, key: String) { preferenceWriter.save(value, key: key) }
     private func persistLibrary() { save(sourceLibrary, key: "sourceLibrary.v1"); persistSelection() }
     private func persistSelection() { save(sourceLibrary.selection, key: "sourceSelection.v1") }
+    func resetCSPComponent(sourceID: String, siteID: String) {
+        do {
+            try sourceLibrary.setCSPComponent(nil, sourceID: sourceID, siteID: siteID)
+            persistLibrary()
+            if playback?.site?.key == sourceID + "::" + siteID { stop() }
+            if sourceLibrary.selectedVODID == sourceID && self.siteID == siteID { refresh() }
+        } catch { alert = error.localizedDescription }
+    }
+    @Published var catalogNeedsRepositorySelection = false
     func refresh(append: Bool = false) {
         catalogTask?.cancel(); requestID = UUID(); let token = requestID
-        catalogError = nil
+        catalogError = nil; catalogNeedsRepositorySelection = false
         if !append { page = 1; videos = []; categories = [] }
         if isDemo {
             videos = Demo.videos.filter { submittedQuery.isEmpty || $0.title.localizedCaseInsensitiveContains(submittedQuery) }; loading = false; pageCount = 1; return
         }
-        guard let site else { loading = false; return }
+        guard let source = selectedVODSource, site != nil else { loading = false; return }
         loading = true
         let selectedCategory = category; let search = submittedQuery; let targetPage = append ? page + 1 : 1
+        let selectedSiteID = siteID
         catalogTask = Task {
             do {
-                async let categoryResult = try? service.categories(site: site)
-                let result = try await service.catalog(site: site, category: selectedCategory, search: search, page: targetPage)
-                let fetchedCategories = await categoryResult
+                let loaded = try await service.catalogRefreshingCSP(source: source, siteID: selectedSiteID, category: selectedCategory, search: search, page: targetPage)
+                let result = loaded.catalog
                 guard !Task.isCancelled, requestID == token else { return }
-                categories = fetchedCategories ?? result.categories
+                if let refreshed = loaded.refreshed {
+                    guard sourceLibrary.vodSources.first(where: { $0.id == source.id }) == source else { loading = false; return }
+                    try sourceLibrary.replaceVOD(source.id, configuration: refreshed.configuration, name: source.name)
+                    persistLibrary()
+                }
+                categories = loaded.categories ?? result.categories
                 if append { var ids = Set(videos.map(\.id)); videos += result.videos.filter { ids.insert($0.id).inserted } } else { videos = result.videos }
                 page = targetPage; pageCount = result.pageCount; loading = false
             } catch {
                 guard !Task.isCancelled, requestID == token else { return }
-                catalogError = error.localizedDescription; loading = false
+                catalogNeedsRepositorySelection = (error as? CSPFailure) == .entryClassMissing
+                catalogError = L10n.string(error.localizedDescription); loading = false
             }
         }
     }
@@ -971,7 +1007,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         importing = false
     }
     func importFile(target: SourceImportTarget = .automatic, name: String = "") {
-        let panel = NSOpenPanel(); panel.title = "导入 TVBox 配置或直播列表"; panel.allowedContentTypes = [.json, .plainText, UTType(filenameExtension: "m3u") ?? .text, UTType(filenameExtension: "m3u8") ?? .text]; panel.canChooseDirectories = false
+        let panel = NSOpenPanel(); panel.title = L10n.text("导入 TVBox 配置或直播列表"); panel.allowedContentTypes = [.json, .plainText, UTType(filenameExtension: "m3u") ?? .text, UTType(filenameExtension: "m3u8") ?? .text]; panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await importURL(url.absoluteString, target: target, name: name); if let importError { alert = importError } }
     }
@@ -988,9 +1024,9 @@ enum LiveLayout: String, CaseIterable, Identifiable {
             channelCache.removeAll(); cacheOrder.removeAll(); liveBrowser.reset(); refreshLive()
         }
         importNotice = nil
-        if result.updatedVOD && !config.sites.isEmpty && !config.sites.contains(where: \.supported) {
+        if result.updatedVOD && !config.sites.isEmpty && !config.sites.contains(where: { service.supports($0) }) {
             let keptExisting = previousVODID != nil && sourceLibrary.selectedVODID == previousVODID && config.location != selectedVODSource?.origin
-            importNotice = "配置已保存：\(config.sites.count) 个点播接口均需要爬虫运行时，当前版本暂不能用于点播。" + (keptExisting ? "原点播源保持选中。" : "可在下方查看兼容状态。") + (result.updatedLive ? "另已保存直播来源，可在“电视直播”页选择。" : "")
+            importNotice = "配置已保存：\(config.sites.count) 个点播接口暂不可调用。Java / CSP 接口需要完整运行时和有效的 spider 配置；旧配置请先刷新一次。" + (keptExisting ? "原点播源保持选中。" : "可在下方查看兼容状态。") + (result.updatedLive ? "另已保存直播来源，可在“电视直播”页选择。" : "")
             section = .sources
         }
         else if target == .live { section = .live }
@@ -1083,7 +1119,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
             if live, let saved = oldLive, let feed = saved.feeds.first, feed.url == origin {
                 _ = try await service.channels(feed: feed)
                 config = Configuration(name: saved.configuration.name, location: origin, feeds: [feed])
-            } else { config = try await service.configuration(at: url) }
+            } else { config = try await service.configuration(at: url, reload: true) }
             // A source removed while its refresh was running must stay removed.
             guard live ? liveSources.first(where: { $0.id == id }) == oldLive : vodSources.first(where: { $0.id == id }) == oldVOD else { return }
             let activeOrigin = live ? selectedLiveSource?.origin : selectedVODSource?.origin
@@ -1132,7 +1168,15 @@ enum LiveLayout: String, CaseIterable, Identifiable {
             publishChannels(index); liveLoading = false; liveError = failures.isEmpty ? nil : failures.joined(separator: "\n")
         }
     }
-    func show(_ video: Video, site: Site?, resume: LibraryEntry? = nil) { detail = DetailSelection(video: video, site: site, resume: resume) }
+    private func refreshedSite(_ site: Site?) -> Site? {
+        guard let site else { return nil }
+        for source in vodSources {
+            let prefix = source.id + "::"
+            if site.key.hasPrefix(prefix), let refreshed = source.runtimeSite(String(site.key.dropFirst(prefix.count))) { return refreshed }
+        }
+        return site
+    }
+    func show(_ video: Video, site: Site?, resume: LibraryEntry? = nil) { detail = DetailSelection(video: video, site: refreshedSite(site), resume: resume) }
     func isFavorite(_ video: Video, site: Site?) -> Bool { favorites.contains { $0.id == LibraryEntry(video: video, site: site).id } }
     func toggleFavorite(_ video: Video, site: Site?) {
         let item = LibraryEntry(video: video, site: site)
@@ -1142,7 +1186,8 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     func clearHistory() { history = []; save(history, key: "history") }
     func play(video: Video, site: Site?, line: PlayLine, index: Int, position: Double = 0, headers: [String: String]? = nil, live: Bool = false) {
         guard line.episodes.indices.contains(index) else { return }
-        saveCurrentPosition(); playback = Playback(video: video, site: site, line: line, index: index, headers: headers ?? site?.headers ?? [:], isLive: live)
+        saveCurrentPosition(); playback?.cspLease?.stop()
+        playback = Playback(video: video, site: site, line: line, index: index, headers: headers ?? site?.headers ?? [:], isLive: live)
         detail = nil
         startPlayback(position: position)
         if !live {
@@ -1172,10 +1217,30 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         player.preferMPV = playbackPreference == .preferIINA
         if current.isLive && current.catchupProgramme == nil {
             player.playLive(current.line.episodes, index: current.index, headers: current.headers) { [weak self] route in self?.playback?.index = route }
-        } else { player.play(current.episode, headers: current.headers, position: position) }
+        } else { player.play(current.resolvedEpisode ?? current.episode, headers: current.headers, position: position) }
     }
-    private func startPlayback(position: Double) {
-        startInternalPlayback(position: position)
+    private func startPlayback(position: Double, forceResolve: Bool = false) {
+        resolutionTask?.cancel(); resolutionID = UUID(); let token = resolutionID
+        guard let current = playback else { return }
+        guard let site = current.site, site.requiresCSP, !current.isLive, forceResolve || current.resolvedEpisode == nil else {
+            startInternalPlayback(position: position); return
+        }
+        playback?.resolvedEpisode = nil
+        player.prepareSpiderPlayback()
+        playback?.cspLease?.stop(); playback?.cspLease = nil
+        resolutionTask = Task {
+            do {
+                let result = try await service.resolvePlayback(site: site, line: current.line, episode: current.episode)
+                guard !Task.isCancelled, resolutionID == token, playback != nil else { return }
+                playback?.resolvedEpisode = Episode(name: current.episode.name, url: result.url.absoluteString)
+                playback?.headers = result.headers
+                playback?.cspLease = result.lease
+                startInternalPlayback(position: position)
+            } catch {
+                guard !Task.isCancelled, resolutionID == token, playback != nil else { return }
+                player.error = error.localizedDescription
+            }
+        }
     }
     func useBuiltInPlayback() {
         guard playback != nil else { return }
@@ -1193,7 +1258,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         guard let current = playback else { return }
         if let programme = current.catchupProgramme, let channel = playingChannel { playCatchup(programme, channel: channel); return }
         if current.isLive { play(video: current.video, site: current.site, line: current.line, index: current.index, headers: current.headers, live: true) }
-        else { startPlayback(position: 0) }
+        else { startPlayback(position: 0, forceResolve: true) }
     }
     func nextLiveRoute() {
         guard let current = playback, current.isLive, current.line.episodes.count > 1 else { return }
@@ -1230,7 +1295,11 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         guard let current = playback, !current.isLive else { return }
         let position = player.position; if position.isFinite { saveProgress(position) }; save(history, key: "history")
     }
-    func stop() { fullscreen.close(); saveCurrentPosition(); player.stopPresentation(); player.stop(); playback = nil }
-    func shutdown() { fullscreen.closeImmediately(); networkProbe.cancel(); saveCurrentPosition(); player.stopPresentation(); player.stop(); preferenceWriter.flush() }
-    func copyURL() { guard let url = playback?.episode.url else { return }; NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url, forType: .string) }
+    func stop() { resolutionTask?.cancel(); resolutionID = UUID(); fullscreen.close(); saveCurrentPosition(); player.stopPresentation(); player.stop(); playback?.cspLease?.stop(); playback = nil }
+    func shutdown() { resolutionTask?.cancel(); catalogTask?.cancel(); liveTask?.cancel(); playback?.cspLease?.stop(); cspRuntime.stop(); fullscreen.closeImmediately(); networkProbe.cancel(); saveCurrentPosition(); player.stopPresentation(); player.stop(); preferenceWriter.flush() }
+    func copyURL() {
+        guard let current = playback else { return }
+        guard let url = current.resolvedEpisode?.url ?? (current.site?.requiresCSP == true ? nil : current.episode.url) else { alert = "播放地址尚未解析成功，请重试后复制。"; return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url, forType: .string)
+    }
 }

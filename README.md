@@ -19,11 +19,27 @@
 
 未导入配置时显示 Blender 开放电影 Sintel 的官方预告片。示例依赖网络，不内置公共影视采集源。
 
+## CSP 组件自动刷新（0.9.6）
+
+0.9.6 修复 CSP 原始订阅更新后，保存的旧校验值与同地址新 JAR 不匹配的问题：发现页加载遇到组件校验失败时，仅刷新当前原始订阅一次，核对同一接口并重新校验；成功后更新该订阅的元数据。仍不一致、接口已更换或本机指定的组件失败会停止并说明原因，不替换校验值或套用其他仓库组件。手动刷新源也会重新获取配置。
+
+## 中英文功能菜单（0.9.5）
+
+顶部菜单、侧边栏、播放和投屏操作、配置管理及网络探测支持简体中文与英文，跟随 macOS 的应用语言。可以在“系统设置 → 通用 → 语言与地区 → 应用程序”中为 TVBox 单独选择语言，退出并重新打开后生效。来源、频道和节目名称按内容提供方原文显示。
+
+语言资源位于 `Resources/en.lproj` 与 `Resources/zh-Hans.lproj`，构建时同时嵌入。`python3 scripts/check-localization.py` 检查两种语言、格式化参数和语言回退，Actions 打包检查也验证资源齐全。
+
+## 软件更新（0.9.4）
+
+TVBox 菜单 → 检查更新，或配置管理 → 软件更新，可手动检测正式新版本。默认每天自动检查并后台下载，退出 TVBox 时安装；不会为了自动更新强制中断当前视频。设置中可分别关闭自动检查与自动下载。更新按当前运行的 Intel / Apple Silicon 架构匹配，由 Sparkle 2.10.0 验证更新清单及安装包的 Ed25519 签名；未签名、被篡改的更新不安装。
+
+当前更新仓库为 bikong0411/TVBox-For-MacOS。首次发布需要把更新后的完整源码和工作流上传到仓库，并一次性设置 SPARKLE_PRIVATE_KEY Actions Secret；详细步骤见 [自动更新发布说明](UPDATE-RELEASE.md)。首次安装含更新功能的 0.9.4 后，后续版本才能自动更新；旧版应用不会自动获得尚未包含的更新功能。
+
 ## 支持范围
 
 | 内容 | 状态 |
 | --- | --- |
-| 标准 TVBox JSON / JSON5 `sites`、`lives`、`urls` | 已支持；`urls` 子配置需手动选择 |
+| 标准 TVBox JSON / JSON5 `sites`、`lives`、`urls`、`storeHouse` | 已支持；多仓目录可搜索并选择原始仓库 |
 | 图片前缀 + `**` Base64 配置、纯 Base64、UTF-8 BOM | 已支持；不依赖响应的 MIME 类型 |
 | `type: 1` JSON 采集接口 | 分类、分页、站内搜索、详情、多线路选集 |
 | `type: 0` XML 采集接口 | 分类、分页、站内搜索、详情、CDATA 及多线路 |
@@ -36,11 +52,20 @@
 | 全屏、画中画、倍速 | 直播 / 点播统一全屏按钮、双击、Control + Command + F；Esc 返回，画中画与倍速保留 |
 | 独立播放器、复制地址 | 内置 VideoLAN VLCKit 3.7.3；可优先使用本机 IINA 的 mpv 组件，无强制依赖 |
 | 播放错误诊断 | 中文区分 TLS、证书、网络、鉴权和失效地址；错误详情不含 URL 或凭据 |
-| Android JAR / CSP、JS / Python 爬虫 | **未支持**，明确标记为“待适配” |
+| `type: 3` Java / CSP | Mac 内置独立 Android / ARM64 运行时；标准 Spider 分类、搜索、详情与直链播放解析 |
+| JS / Python 爬虫 | **未支持** |
 | `type: 4` 远程爬虫、加密配置 | **未支持** |
 | `parses` 解析、网页嗅探、DRM、自定义 DNS / hosts | **未支持** |
 
-仅导入含 JAR / CSP 源的配置时，可以查看配置及兼容状态，无法执行这些源。不能保证任意网上的 TVBox 地址均可使用。搜索限当前影视源。
+Java / CSP 配置需要包含全局 `spider` 或接口自己的 `jar` 地址；支持 `;md5;` 与 `;sha256;` 校验以及字符串 / 对象形式的 `ext`。旧版保存的配置请刷新一次以补齐这些信息。接口运行不需要其他设备，播放器继续使用软件内的 mpv / VLC；首次启动和 Intel ARM 模拟需要更长时间。不能保证所有第三方组件、登录流程和网页解析都可用，失败会显示中文说明。搜索限当前影视源。
+
+0.9.0 加入上述独立 CSP 运行时，按需启动，退出 TVBox 后自动关闭。首页与分类的相同并发请求合并；切换组件时隔离类加载和数据，过期的播放解析结果不会覆盖新剧集。需要网页解析或缺少专有运行库的线路仍显示说明。0.9.3 起支持标准 Java 本地代理回调，第三方私有代理服务仍可能不兼容。
+
+0.9.3 补齐标准 Java / CSP `Proxy.proxy(Map)` / `proxyLocal(Map)` 媒体回调，以经过认证的内置运行时处理代理请求；Mac 仅提供按播放会话创建的临时回环转发，视频数据流式传输。支持 HLS 清单与本地代理分段地址重写、AES key 与 Range，保留插件自身处理逻辑，不直接剥离 URL 猜测真实片源。停止、换片和退出释放代理。并新增 CSP 错误页的原始仓库入口，避免误用旧合并源。
+
+0.9.2 支持 `storeHouse`（`sourceName` / `sourceUrl`）与既有 `urls` 多仓目录。发现页显示仓库列表，可搜索、打开嵌套目录；子配置按自己的原始 URL 解析相对 JAR / API 并单独保存，不合并不同仓库的全局组件、接口 key 或播放记录。直播清单自动加入直播源。聚合服务若已将不同仓库扁平合并且只保留一个 `spider`，客户端无法可靠恢复丢失的归属，需要使用该服务的多仓版或原仓库，不能按显示名称猜组件。
+
+0.9.1 补齐标准 Spider 的 `safeDns()` 方法，使用 Android 系统 DNS；错误提示区分配置入口不存在、实际依赖缺失与 SDK 接口不兼容。本机组件修正按订阅和接口单独保存，刷新或重启不覆盖；接口 API 改变后不沿用旧修正，修改订阅 URL 后清除。配置管理中的“本机修正组件”标记可右键恢复来源提供的组件。
 
 0.1.2 增加播放错误诊断与公开演示自检入口。TLS 错误表示安全连接建立失败，不能仅凭这一提示确定是否证书过期。可用公开演示视频检查播放器链路；片源自身的证书或协议问题仍需维护者修复。
 
@@ -60,16 +85,22 @@
 
 ## 开发
 
-源码包附带官方 VLCKit 二进制归档和 FFmpeg 源码。安装 Swift 6 及相应 Xcode Command Line Tools 后，可在 Intel Mac 直接编译：
+源码包附带官方播放依赖；CSP 构建脚本按 SHA-256 下载固定输入。安装 Swift 6、Xcode Command Line Tools、Python 3.9+ 与构建工具后，可在 Intel Mac 直接编译。运行成品应用不需要这些开发工具：
 
 ```bash
+brew install e2fsprogs pkgconf
+python3 scripts/prepare-csp-runtime.py
 bash scripts/build-app.sh
 # Intel Mac 上默认生成 Intel 应用，也可显式指定：
 bash scripts/build-app.sh intel
 # 生成同时支持 Intel 和 Apple Silicon 的通用包：
+python3 scripts/prepare-csp-runtime.py --arch universal
 bash scripts/build-app.sh --universal
 bash scripts/test.sh
 ```
+
+CSP 运行时的来源、许可证、数据位置、重建方法和能力边界见 [CSP-Runtime.md](ThirdPartySources/CSP-Runtime.md)。
+首次源码构建需要下载 Android 镜像和编译运行时，安装包会比仅包含播放器的旧版本更大。
 
 `build-app.sh` 生成 `.app`、应用图标、ad hoc 本机签名及 ZIP，同时调用 `build-remux.sh` 从随源码包附带的官方 FFmpeg 源码构建独立兼容工具。默认按本机架构构建，intel 指定 x86_64，--universal 分别编译 arm64 / x86_64 后合并；最低 macOS 13。内置 VLC、应用和直播辅助工具均检查目标架构、非系统外部依赖与完整签名。没有 Apple Developer 分发签名和公证，跨机器分发前需要用自己的开发者身份签名、公证。
 

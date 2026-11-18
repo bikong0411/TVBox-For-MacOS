@@ -1,0 +1,38 @@
+[
+  {
+    "name": "linux_6.1.192.orig.tar.xz",
+    "url": "https://deb.debian.org/debian-security/pool/updates/main/l/linux/linux_6.1.192.orig.tar.xz",
+    "sha256": "22c0dd635fead7dcba91baf1893e6569634df86ffe6b7b96a201624cc0e88efe",
+    "size": 138014500
+  },
+  {
+    "name": "linux_6.1.192-2.debian.tar.xz",
+    "url": "https://deb.debian.org/debian-security/pool/updates/main/l/linux/linux_6.1.192-2.debian.tar.xz",
+    "sha256": "df8401c4e0b56139ad3605b417fe473dbefc892536749745b7f928aa560ab86d",
+    "size": 1975532
+  },
+  {
+    "name": "busybox_1.35.0.orig.tar.bz2",
+    "url": "https://deb.debian.org/debian/pool/main/b/busybox/busybox_1.35.0.orig.tar.bz2",
+    "sha256": "faeeb244c35a348a334f4a59e44626ee870fb07b6884d68c10ae8bc19f83a694",
+    "size": 2480624
+  },
+  {
+    "name": "busybox_1.35.0-4+deb12u1.debian.tar.xz",
+    "url": "https://deb.debian.org/debian/pool/main/b/busybox/busybox_1.35.0-4+deb12u1.debian.tar.xz",
+    "sha256": "1cacbe095ef4880ea7879933c8e3c5075d1527cd6fbcb626a9b41e5daefd1a46",
+    "size": 68028
+  },
+  {
+    "name": "glibc_2.36.orig.tar.xz",
+    "url": "https://deb.debian.org/debian/pool/main/g/glibc/glibc_2.36.orig.tar.xz",
+    "sha256": "a543c02070d46ccaf866957efd13f10c924daa74c86a90a0254db09a92a708ee",
+    "size": 19363988
+  },
+  {
+    "name": "glibc_2.36-9+deb12u14.debian.tar.xz",
+    "url": "https://deb.debian.org/debian/pool/main/g/glibc/glibc_2.36-9+deb12u14.debian.tar.xz",
+    "sha256": "cf4ac9cd98185452cae3ef34e2e4ee12753e3d93fd0c62c61396d4a47eec902f",
+    "size": 918488
+  }
+]

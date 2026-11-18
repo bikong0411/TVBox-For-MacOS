@@ -1,0 +1,50 @@
+[
+  {
+    "coordinate": "com.squareup.okhttp3:okhttp:4.12.0",
+    "file": "okhttp-4.12.0.jar",
+    "sha256": "b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0",
+    "url": "https://maven-central.storage-download.googleapis.com/maven2/com/squareup/okhttp3/okhttp/4.12.0/okhttp-4.12.0.jar"
+  },
+  {
+    "coordinate": "com.squareup.okio:okio-jvm:3.6.0",
+    "file": "okio-jvm-3.6.0.jar",
+    "sha256": "67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412",
+    "url": "https://repo.maven.apache.org/maven2/com/squareup/okio/okio-jvm/3.6.0/okio-jvm-3.6.0.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:1.8.21",
+    "file": "kotlin-stdlib-1.8.21.jar",
+    "sha256": "042a1cd1ac976cdcfe5eb63f1d8e0b0b892c9248e15a69c8cfba495d546ea52a",
+    "url": "https://maven-central.storage-download.googleapis.com/maven2/org/jetbrains/kotlin/kotlin-stdlib/1.8.21/kotlin-stdlib-1.8.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.21",
+    "file": "kotlin-stdlib-jdk7-1.8.21.jar",
+    "sha256": "33d148db0e11debd0d90677d28242bced907f9c77730000fd597867089039d86",
+    "url": "https://maven-central.storage-download.googleapis.com/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk7/1.8.21/kotlin-stdlib-jdk7-1.8.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.21",
+    "file": "kotlin-stdlib-jdk8-1.8.21.jar",
+    "sha256": "3db752a30074f06ee6c57984aa6f27da44f4d2bbc7f5442651f6988f1cb2b7d7",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk8/1.8.21/kotlin-stdlib-jdk8-1.8.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains:annotations:13.0",
+    "file": "annotations-13.0.jar",
+    "sha256": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+    "url": "https://maven-central.storage-download.googleapis.com/maven2/org/jetbrains/annotations/13.0/annotations-13.0.jar"
+  },
+  {
+    "coordinate": "com.google.code.gson:gson:2.11.0",
+    "file": "gson-2.11.0.jar",
+    "sha256": "57928d6e5a6edeb2abd3770a8f95ba44dce45f3b23b7a9dc2b309c581552a78b",
+    "url": "https://maven-central.storage-download.googleapis.com/maven2/com/google/code/gson/gson/2.11.0/gson-2.11.0.jar"
+  },
+  {
+    "coordinate": "org.jsoup:jsoup:1.18.3",
+    "file": "jsoup-1.18.3.jar",
+    "sha256": "5be1ccd3228ae5fd6eed1bd6d827bac2bc65b91c20e9957d16ea65f739f15302",
+    "url": "https://maven-central.storage-download.googleapis.com/maven2/org/jsoup/jsoup/1.18.3/jsoup-1.18.3.jar"
+  }
+]

@@ -9,12 +9,12 @@ delivery = root.parent / "TVBoxMac-Delivery"
 delivery.mkdir(exist_ok=True)
 if (delivery / "TVBox.app").exists(): shutil.rmtree(delivery / "TVBox.app")
 shutil.copytree(root / "dist/Release/TVBox.app", delivery / "TVBox.app", symlinks=True)
-for name in ["TVBox-macOS-Universal.zip", "TVBox-macOS-Intel.zip"]:
+for name in ["TVBox-macOS-Universal.zip", "TVBox-macOS-Intel.zip", "TVBox-macOS-AppleSilicon.zip", "TVBox-CSP-Corresponding-Sources.zip"]:
     shutil.copy2(root / "dist" / name, delivery)
 source = delivery / "Source"
 if source.exists(): shutil.rmtree(source)
 source.mkdir(exist_ok=True)
-for name in ["Package.swift", "README.md", "VALIDATION.md", ".gitignore", ".github", "Sources", "Tests", "Resources", "scripts", "Examples", "Helpers", "ThirdPartySources"]:
+for name in ["Package.swift", "README.md", "VALIDATION.md", "UPDATE-RELEASE.md", ".gitignore", ".github", "Sources", "Tests", "Resources", "scripts", "Examples", "Helpers", "ThirdPartySources"]:
     path = root / name
     if name == "Sources":
         # Only SwiftPM's declared source modules belong in the distribution. Preserve
@@ -30,7 +30,16 @@ with zipfile.ZipFile(delivery / "TVBoxMac-Source.zip", "w", zipfile.ZIP_DEFLATED
     for path in sorted(source.rglob("*")):
         if path.is_file():
             archive.write(path, Path("TVBoxMac") / path.relative_to(source))
-(delivery / "使用说明.txt").write_text("""TVBox for macOS 0.8.8
+with zipfile.ZipFile(delivery / "TVBoxMac-GitHub-Source.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted(source.rglob("*")):
+        if not path.is_file(): continue
+        relative = path.relative_to(source)
+        if relative.parts[0] == "ThirdPartySources" and path.suffix in [".zip", ".xz", ".gz"]: continue
+        if path.name.startswith("SPARKLE_PRIVATE_KEY"): continue
+        archive.write(path, relative)
+for name in ["appcast-Intel.xml", "appcast-AppleSilicon.xml", "TVBox-macOS-Intel.sha256", "TVBox-macOS-AppleSilicon.sha256"]:
+    if (root / "dist" / name).exists(): shutil.copy2(root / "dist" / name, delivery / name)
+(delivery / "使用说明.txt").write_text("""TVBox for macOS 0.9.6
 
 直接打开 TVBox.app，可复制到“应用程序”后使用。
 适用于 Intel（x86_64）与 Apple Silicon（M 系列芯片），最低 macOS 13。
@@ -42,7 +51,15 @@ AirPlay 选中设备后主动发起视频播放，只有系统播放器就绪、
 小米等兼容接收器可选择“投屏 → AirPlay 电视 → 兼容连接”中的电视，直接进行 AirPlay 视频投放。该方式不依赖系统播放器加载片源，客厅小米电视已验证出画及暂停、跳转、继续、停止和返回本机；上方系统 AirPlay 入口继续保留。兼容连接支持 HTTP / HTTPS、本地视频及 HLS 转发，支持切集重投和返回本机，电视音量请使用遥控器调整；结束时关闭临时转发服务，无磁盘视频缓存。需要密码或配对的设备请使用系统 AirPlay 完成授权，软件不会绕过授权。
 
 已支持：多个点播源与多个直播源独立保存和切换、JSON/XML 影视接口、分类搜索、多线路剧集、M3U/TXT 直播、视频直链、收藏和续播。
-暂不支持：Android JAR/CSP、JS/Python 爬虫、type 4、加密配置、网页嗅探和解析服务。
+0.9.6 修复原始订阅更新 JAR 后旧校验值导致的重复失败。发现页遇到组件校验不匹配时，仅刷新当前原订阅一次，再按新声明重新校验；成功后保存该订阅。持续不匹配、本机修正组件失败或接口已更换时停止并说明，不跳过校验，也不套用其他仓库的组件。
+0.9.5 的顶部菜单、侧边栏、播放 / 投屏操作、配置管理及网络探测支持简体中文和英文，跟随 macOS 为应用选择的语言，重新打开应用后生效。可在 macOS“系统设置 → 通用 → 语言与地区 → 应用程序”中单独为 TVBox 选择语言。英文长标签已调整布局。
+新增 Java / CSP（type 3）支持：Mac 内置独立运行时，运行不要求 Java、Android SDK、Docker 或其他设备。支持标准 Spider 初始化、首页、分类、搜索、详情和直链播放解析。旧版保存的配置请在配置管理刷新一次，读取 spider / jar 和 ext 后重新选择接口。视频继续在软件内的 mpv / VLC 播放。
+0.9.4 增加软件更新：TVBox 菜单或配置管理中可检查新版本，默认每天检查并后台下载，退出时安装。更新来自 GitHub 正式 Release，按 Intel / Apple Silicon 匹配，并验证签名。首次发布的配置步骤见 Source/UPDATE-RELEASE.md。
+0.9.3 增加 Java / CSP 标准本地视频代理回调及流式转发，支持常见 Proxy.proxy / proxyLocal、HLS 清单、分段和 Range。代理按播放会话创建，停止、切集或退出关闭，不将整个视频写入磁盘。接口返回空播放结果会给出明确说明；此能力不等于网页嗅探、转码或专有云盘 SDK 支持。
+0.9.2 支持 urls 及 storeHouse / sourceName / sourceUrl 多仓目录。在“发现”中选择原始仓库后，按原仓库地址加载自己的 spider / jar，保留仓库独立身份，不再将所有接口套用聚合器的同一个全局组件。可搜索仓库和打开嵌套目录，直播清单自动加入直播源。已经丢失原始归属的扁平合并配置无法可靠自动还原，请导入来源提供的多仓版或原仓库。
+0.9.1 补齐标准 Spider.safeDns 接口，区分“爬虫入口不存在”“依赖库缺失”和“运行时接口版本不兼容”。针对单个接口的本机组件修正会跨刷新和重启保留；配置管理显示“本机修正组件”，右键可恢复源配置提供的组件。修正只对同一订阅、接口 key 与 API 生效，修改订阅地址后清除。
+运行时按需启动，Apple Silicon 使用硬件加速；Intel 使用 ARM 模拟，首次启动可能需要数分钟。退出 TVBox 后自动关闭运行时。数据位于 ~/Library/Application Support/TVBoxMac/CSPRuntime/data-v1.qcow2，这是组件数据镜像，不是视频缓存。
+暂不支持：JS/Python 爬虫、type 4、加密配置、网页嗅探和解析服务。不能保证所有第三方 CSP、专有 SDK 或登录流程可用；需要正常账号授权的来源仍按其规则使用。
 
 点击“添加内容源”填入自己的 TVBox JSON 地址或选择本地文件。
 可选择“仅点播源”或“仅直播源”，两份列表互不覆盖。
@@ -71,9 +88,10 @@ mpv 组件与 VLC 均可解码 FLV、MKV、MPEG-TS 等格式。mpv 直接接收�
 
 Source/ 是完整源码工程，开发和构建说明见 Source/README.md。
 TVBoxMac-Source.zip 为源码压缩包。
+TVBox-CSP-Corresponding-Sources.zip 为 CSP 运行时相关开源组件的对应源码及构建说明。
 TVBox-macOS-Universal.zip 为 Intel / Apple Silicon 通用应用。
 TVBox-macOS-Intel.zip 为仅 Intel 的应用压缩包。
-在 Intel Mac 编译：安装 Swift 6 / Command Line Tools，进入 Source 执行 bash scripts/build-app.sh；也可显式指定 bash scripts/build-app.sh intel。
+在 Intel Mac 编译：安装 Swift 6 / Command Line Tools、Python 3.9+、e2fsprogs 和 pkgconf，进入 Source 先执行 python3 scripts/prepare-csp-runtime.py，再执行 bash scripts/build-app.sh intel。首次需联网下载固定校验的构建输入，详细步骤见 Source/README.md。
 测试结果见 Source/VALIDATION.md。
 
 应用已做本机 ad hoc 签名，尚未做 Apple Developer 分发签名和公证。

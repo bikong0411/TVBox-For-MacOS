@@ -8,6 +8,8 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import json
+import hashlib
 
 root = Path(__file__).resolve().parent.parent
 source = (root / "Resources/Info.plist").read_bytes()
@@ -37,16 +39,26 @@ def check(ref_type="branch", ref="main", run="12", attempt="1", valid=True):
             package = project / "fixture.zip"
             prefix = "TVBox.app/Contents/"
             members = ["MacOS/TVBoxMac", "Helpers/tvbox-remux", "Frameworks/VLCKit.framework/Versions/A/VLCKit",
+                       "Frameworks/Sparkle.framework/Versions/B/Sparkle",
                        "Resources/FFmpeg-LICENSE.txt", "Resources/VLCKit-LICENSE.txt"]
-            def archive(info):
+            runtime_files={name:b'fixture-runtime' for name in ['CSPRuntimeHost','gvproxy','kernel','bootstrap.cpio.gz','system.qcow2','data-template.qcow2']}
+            runtime_manifest={'version':1,'files':{name:hashlib.sha256(data).hexdigest() for name,data in runtime_files.items()}}
+            def archive(info,corrupt=False):
                 with zipfile.ZipFile(package, "w") as output:
                     output.writestr(prefix + "Info.plist", plistlib.dumps(info))
+                    for language in ['en', 'zh-Hans']:
+                        for name in ['Localizable.strings', 'InfoPlist.strings']:
+                            output.writestr(prefix + 'Resources/' + language + '.lproj/' + name, (root / 'Resources' / (language + '.lproj') / name).read_bytes())
                     for member in members: output.writestr(prefix + member, b"fixture")
+                    for name,data in runtime_files.items():output.writestr(prefix+'Resources/CSPRuntime/'+name,b'altered' if corrupt and name=='kernel' else data)
+                    output.writestr(prefix+'Resources/CSPRuntime/manifest.json',json.dumps(runtime_manifest))
             verify = [sys.executable, str(project / "scripts/ci-verify-package.py"), str(package)]
             archive(stamped)
             assert subprocess.run(verify, capture_output=True).returncode == 0, "Stamped package rejected"
             archive(initial)
             assert subprocess.run(verify, capture_output=True).returncode != 0, "Wrong package version accepted"
+            archive(stamped,corrupt=True)
+            assert subprocess.run(verify,capture_output=True).returncode != 0, "Altered runtime accepted"
         checks += 1
 
 check()

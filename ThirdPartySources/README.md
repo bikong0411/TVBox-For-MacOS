@@ -34,3 +34,11 @@ GitHub checkouts can omit the VLCKit binary archive. scripts/fetch-dependencies.
 When selected and available, TVBox dynamically loads libmpv.2.dylib and its media dependencies from the user's installed IINA bundle. These binaries are not copied into or redistributed with TVBox. IINA is not launched. TVBox supplies its own embedded renderer, configuration and playback controls. The installed component's own licensing and source notices remain with that IINA installation.
 
 The small MPVBridge ABI wrapper uses declarations from the ISC-licensed public libmpv API (https://github.com/mpv-player/mpv/tree/master/include/mpv). The corresponding notice is in Sources/MPVBridge/MPV-API-LICENSE.txt and in the packaged application as Resources/MPV-API-LICENSE.txt.
+
+# Standalone CSP runtime
+
+The application bundles its private Android ARM64 runtime, built from pinned QEMU / GLib sources, Debian Linux / BusyBox and ReDroid inputs, with gvproxy and our Android Worker. See CSP-Runtime.md for exact inputs, licensing, corresponding sources and rebuild instructions. Runtime notices are bundled in Contents/Resources/CSPRuntime/licenses. The separate TVBox-CSP-Corresponding-Sources.zip accompanies application releases.
+
+# Sparkle application updater
+
+The unmodified official Sparkle 2.10.0 XCFramework and publishing tools are obtained from https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0. The SDK archive SHA-256 is 17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959, matching the upstream 2.10.0 Package.swift. The framework is distributed under its included permissive license; its nested installer and XPC signatures are preserved. Only the framework is embedded in TVBox; publishing tools stay outside the application. Update private keys are not included in the application or source delivery.

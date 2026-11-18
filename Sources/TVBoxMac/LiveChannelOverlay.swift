@@ -66,7 +66,7 @@ struct LiveChannelOverlay: View {
     private var filterKey: String { "\(store.channelRevision)|\(browser.grouping)|\(browser.group)|\(query)" }
     private var groups: [String] { store.channelIndex.groups(for: browser.grouping) }
     private var guideKey: String { "\(guideChannel?.id ?? "")|\(day)|\(refresh)" }
-    private var displayDay: String { day.formatted(.dateTime.month().day().weekday().locale(Locale(identifier: "zh_CN"))) }
+    private var displayDay: String { day.formatted(.dateTime.month().day().weekday().locale(Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en"))) }
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -76,10 +76,10 @@ struct LiveChannelOverlay: View {
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 } else {
                     Button { visibility.open() } label: {
-                        VStack(spacing: 9) { Image(systemName: "list.bullet"); Text("选\n台").lineSpacing(3); Image(systemName: "chevron.right").font(.system(size: 9)) }
+                        VStack(spacing: 9) { Image(systemName: "list.bullet"); Text(L10n.text("选\n台")).lineSpacing(3); Image(systemName: "chevron.right").font(.system(size: 9)) }
                             .font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.85))
                             .frame(width: 26, height: 116).background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 7))
-                    }.buttonStyle(.plain).accessibilityLabel("展开直播频道列表").help("鼠标移入选台，离开 3 秒后收起")
+                    }.buttonStyle(.plain).accessibilityLabel(L10n.text("展开直播频道列表")).help(L10n.text("鼠标移入选台，离开 3 秒后收起"))
                 }
             }
             .frame(height: max(0, geometry.size.height - 84))
@@ -108,15 +108,15 @@ struct LiveChannelOverlay: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 if guideChannel != nil {
-                    Button { guideChannel = nil; visibility.activity() } label: { Image(systemName: "chevron.left") }.help("返回频道列表")
-                    Text("节目预告 / 回看").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Button { guideChannel = nil; visibility.activity() } label: { Image(systemName: "chevron.left") }.help(L10n.text("返回频道列表"))
+                    Text(L10n.text("节目预告 / 回看")).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 } else {
                     Image(systemName: "list.bullet").foregroundStyle(Theme.accent)
-                    Text("直播频道").font(.system(size: 14, weight: .semibold))
+                    Text(L10n.text("直播频道")).font(.system(size: 14, weight: .semibold))
                     Text("\(store.channels.count)").font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer(minLength: 0)
-                Button { visibility.close() } label: { Image(systemName: "chevron.left.2") }.help("收起频道列表")
+                Button { visibility.close() } label: { Image(systemName: "chevron.left.2") }.help(L10n.text("收起频道列表"))
             }.buttonStyle(.plain)
             if let channel = guideChannel { programmePane(channel) }
             else { channelPane }
@@ -128,7 +128,7 @@ struct LiveChannelOverlay: View {
             if !showGroups {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.55))
-                TextField("搜索频道", text: $query).textFieldStyle(.plain).font(.system(size: 12))
+                TextField(L10n.text("搜索频道"), text: $query).textFieldStyle(.plain).font(.system(size: 12))
                 if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
             }.padding(7).background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
             ScrollViewReader { proxy in
@@ -151,22 +151,22 @@ struct LiveChannelOverlay: View {
                                         }
                                         Spacer(minLength: 0)
                                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8).contentShape(Rectangle())
-                                }.buttonStyle(.plain).help("播放 \(channel.name)")
+                                }.buttonStyle(.plain).help(L10n.text("播放 \(channel.name)"))
                                 if channel.guide?.url.isEmpty == false {
                                     Button { guideChannel = channel; day = Calendar.current.startOfDay(for: Date()); visibility.activity() } label: {
                                         Image(systemName: "calendar.badge.clock").font(.system(size: 13)).frame(width: 24, height: 34).foregroundStyle(.white.opacity(0.8))
-                                    }.buttonStyle(.plain).help("查看 \(channel.name) 的节目预告和回看").accessibilityLabel("\(channel.name) 节目预告和回看")
+                                    }.buttonStyle(.plain).help(L10n.text("查看 \(channel.name) 的节目预告和回看")).accessibilityLabel(L10n.text("\(channel.name) 节目预告和回看"))
                                 }
                             }.padding(.horizontal, 7).background(store.playback?.video.id == channel.id ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 6)).id(channel.id)
                             }
                             } header: {
                                 HStack {
-                                    Text(section.name).font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.accent)
+                                    Text(L10n.channelGroup(section.name, automatic: browser.grouping == .automatic)).font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.accent)
                                     Spacer(); Text("\(section.channels.count)").font(.system(size: 9)).foregroundStyle(.white.opacity(0.5))
                                 }.padding(.horizontal, 7).padding(.top, 9).padding(.bottom, 3)
                             }
                         }
-                        if sections.isEmpty { Text("没有匹配的频道").font(.system(size: 11)).foregroundStyle(.white.opacity(0.6)).padding(.vertical, 20) }
+                        if sections.isEmpty { Text(L10n.text("没有匹配的频道")).font(.system(size: 11)).foregroundStyle(.white.opacity(0.6)).padding(.vertical, 20) }
                     }
                 }
                 .task(id: "\(visibility.expanded)|\(filterKey)|\(sections.first?.id ?? "")") {
@@ -175,7 +175,7 @@ struct LiveChannelOverlay: View {
                 }
             }
             }
-            Text("移开鼠标 3 秒后收起").font(.system(size: 9)).foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity, alignment: .leading)
+            Text(L10n.text("移开鼠标 3 秒后收起")).font(.system(size: 9)).foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
     private var groupChooser: some View {
@@ -183,21 +183,21 @@ struct LiveChannelOverlay: View {
             Button { showGroups.toggle(); visibility.activity() } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "square.stack.3d.up").foregroundStyle(Theme.accent)
-                    Text(browser.group).lineLimit(1)
+                    Text(L10n.channelGroup(browser.group, automatic: browser.grouping == .automatic)).lineLimit(1)
                     Spacer(minLength: 0)
-                    Text(browser.grouping.title).font(.system(size: 9)).foregroundStyle(.white.opacity(0.5))
+                    Text(L10n.string(browser.grouping.title)).font(.system(size: 9)).foregroundStyle(.white.opacity(0.5))
                     Image(systemName: showGroups ? "chevron.up" : "chevron.down").font(.system(size: 9))
                 }.font(.system(size: 11)).padding(7).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
-            }.buttonStyle(.plain).help("选择频道分组")
+            }.buttonStyle(.plain).help(L10n.text("选择频道分组"))
             if showGroups {
-                Picker("频道分类方式", selection: $browser.grouping) { ForEach(ChannelGrouping.allCases) { Text($0.title).tag($0) } }
+                Picker(L10n.text("频道分类方式"), selection: $browser.grouping) { ForEach(ChannelGrouping.allCases) { Text(L10n.string($0.title)).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().controlSize(.small)
                 ScrollView(showsIndicators: true) {
                     LazyVStack(spacing: 2) {
                         ForEach(groups, id: \.self) { name in
                             Button { browser.group = name; showGroups = false; visibility.activity() } label: {
                                 HStack {
-                                    Text(name).lineLimit(1); Spacer()
+                                    Text(L10n.channelGroup(name, automatic: browser.grouping == .automatic)).lineLimit(1); Spacer()
                                     Text("\(store.channelIndex.count(group: name, grouping: browser.grouping))").monospacedDigit().fixedSize().foregroundStyle(.white.opacity(0.5))
                                     Image(systemName: "checkmark").foregroundStyle(Theme.accent).frame(width: 12).opacity(browser.group == name ? 1 : 0)
                                 }.font(.system(size: 11)).padding(.horizontal, 6).padding(.vertical, 6).frame(maxWidth: .infinity).contentShape(Rectangle())
@@ -212,23 +212,23 @@ struct LiveChannelOverlay: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(channel.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
             HStack(spacing: 4) {
-                Button { changeDay(-1) } label: { Image(systemName: "chevron.left").frame(width: 24, height: 22) }.help("前一天")
+                Button { changeDay(-1) } label: { Image(systemName: "chevron.left").frame(width: 24, height: 22) }.help(L10n.text("前一天"))
                 Text(displayDay).font(.system(size: 11)).frame(maxWidth: .infinity)
-                Button { day = Calendar.current.startOfDay(for: Date()); visibility.activity() } label: { Text("今天").font(.system(size: 10)) }
-                Button { changeDay(1) } label: { Image(systemName: "chevron.right").frame(width: 24, height: 22) }.help("后一天")
+                Button { day = Calendar.current.startOfDay(for: Date()); visibility.activity() } label: { Text(L10n.text("今天")).font(.system(size: 10)) }
+                Button { changeDay(1) } label: { Image(systemName: "chevron.right").frame(width: 24, height: 22) }.help(L10n.text("后一天"))
             }.buttonStyle(.plain)
-            if guide.loading { ProgressView("加载节目单…").font(.system(size: 11)).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if guide.loading { ProgressView(L10n.text("加载节目单…")).font(.system(size: 11)).frame(maxWidth: .infinity, maxHeight: .infinity) }
             else if let error = guide.error {
                 VStack(spacing: 12) {
                     Text(error).font(.system(size: 11)).foregroundStyle(.white.opacity(0.7))
-                    Button("重试") { refresh += 1; visibility.activity() }
+                    Button(L10n.text("重试")) { refresh += 1; visibility.activity() }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: 6) {
                             ForEach(guide.programmes) { programme in programmeRow(programme, channel: channel).id(programme.id) }
-                            if guide.programmes.isEmpty { Text("该日期没有可用节目单").font(.system(size: 11)).foregroundStyle(.white.opacity(0.6)).padding(.vertical, 20) }
+                            if guide.programmes.isEmpty { Text(L10n.text("该日期没有可用节目单")).font(.system(size: 11)).foregroundStyle(.white.opacity(0.6)).padding(.vertical, 20) }
                         }
                     }.task(id: guide.programmes.first?.id) {
                         let now = Date()
@@ -238,25 +238,25 @@ struct LiveChannelOverlay: View {
                 }
             }
             if store.playback?.catchupProgramme != nil, let playing = store.playingChannel {
-                Button { store.playChannel(playing); visibility.activity() } label: { Label("返回直播", systemImage: "dot.radiowaves.left.and.right").font(.system(size: 11)) }.buttonStyle(.plain).foregroundStyle(Theme.accent)
+                Button { store.playChannel(playing); visibility.activity() } label: { Label(L10n.text("返回直播"), systemImage: "dot.radiowaves.left.and.right").font(.system(size: 11)) }.buttonStyle(.plain).foregroundStyle(Theme.accent)
             }
-            Text(channel.guide?.catchup == nil ? "此源未提供回看地址" : "可回看节目显示播放按钮").font(.system(size: 9)).foregroundStyle(.white.opacity(0.45))
+            Text(channel.guide?.catchup == nil ? L10n.text("此源未提供回看地址") : L10n.text("可回看节目显示播放按钮")).font(.system(size: 9)).foregroundStyle(.white.opacity(0.45))
         }
     }
     private func programmeRow(_ programme: Programme, channel: Channel) -> some View {
         let now = Date(), playable = channel.guide?.catchup?.playbackURL(programme: programme, liveURL: channel.urls.first ?? "", now: now) != nil
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(programme.start.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(Locale(identifier: "zh_CN")))).monospacedDigit()
+                Text(programme.start.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")))).monospacedDigit()
                 Spacer()
-                Text(programme.isOnAir(at: now) ? "正在播出" : programme.start > now ? "预告" : playable ? "可回看" : "已播出")
+                Text(programme.isOnAir(at: now) ? L10n.text("正在播出") : programme.start > now ? L10n.text("预告") : playable ? L10n.text("可回看") : L10n.text("已播出"))
             }.font(.system(size: 9)).foregroundStyle(programme.isOnAir(at: now) ? Theme.accent : .white.opacity(0.6))
             HStack(alignment: .top) {
                 Text(programme.title).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 if playable {
                     Button { store.playCatchup(programme, channel: channel); visibility.activity() } label: { Image(systemName: "play.circle.fill").font(.system(size: 19)).foregroundStyle(Theme.accent) }
-                        .buttonStyle(.plain).help("回看 \(programme.title)")
+                        .buttonStyle(.plain).help(L10n.text("回看 \(programme.title)"))
                 }
             }
             if !programme.summary.isEmpty { Text(programme.summary).font(.system(size: 10)).foregroundStyle(.white.opacity(0.55)).lineLimit(3) }

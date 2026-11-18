@@ -1,0 +1,70 @@
+[
+  {
+    "name": "gvproxy-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/containers/gvisor-tap-vsock/v0.9.0/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "size": 11358
+  },
+  {
+    "name": "qemu-sources.tar",
+    "url": "https://github.com/arcboxlabs/qemu/releases/download/v0.1.0/qemu-darwin-arm64-v0.1.0-sources.tar",
+    "sha256": "c46947444ffc4980b5de5dca06b7f90be9f05837b12acb2472f833f6bf709a61",
+    "size": 150669312
+  },
+  {
+    "name": "redroid-arm64.tar.gz",
+    "url": "https://mirror.gcr.io/v2/redroid/redroid/blobs/sha256:7ae0e9111b77895cc932d126b75e9bf16af5f9bb881e3dae79163621e8b10cb3",
+    "sha256": "7ae0e9111b77895cc932d126b75e9bf16af5f9bb881e3dae79163621e8b10cb3",
+    "size": 640472802
+  },
+  {
+    "name": "linux-arm64.deb",
+    "url": "https://deb.debian.org/debian-security/pool/updates/main/l/linux-signed-arm64/linux-image-6.1.0-56-arm64_6.1.192-2_arm64.deb",
+    "sha256": "6f4ed2d1cb9106bc977c2b1960008f175e2eed5740340634b7894e65ef5acc82",
+    "size": 59812568
+  },
+  {
+    "name": "busybox-arm64.deb",
+    "url": "https://deb.debian.org/debian/pool/main/b/busybox/busybox-static_1.35.0-4+deb12u1+b1_arm64.deb",
+    "sha256": "732c9135564fc71337e0e05fb4da4d11e6c28c1834bce3e405e575afef2a52f5",
+    "size": 822236
+  },
+  {
+    "name": "tools/platform.zip",
+    "url": "https://dl.google.com/android/repository/platform-35_r02.zip",
+    "sha256": "0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0",
+    "size": 64273788
+  },
+  {
+    "name": "tools/build-tools.zip",
+    "url": "https://dl.google.com/android/repository/build-tools_r35_macosx.zip",
+    "sha256": "530cdbd1ec315e1477624d7ed2f0f2962108d69f36eddba5894cef9ea2cedb48",
+    "size": 76857898
+  },
+  {
+    "name": "tools/ecj.jar",
+    "url": "https://maven-central.storage-download.googleapis.com/maven2/org/eclipse/jdt/ecj/3.40.0/ecj-3.40.0.jar",
+    "sha256": "05cc22a24e7982970f63a405fc6c820bc80b806f27f3c5a6236fc475f8f7152b",
+    "size": 3312549
+  },
+  {
+    "name": "tools/gvproxy",
+    "url": "https://github.com/containers/gvisor-tap-vsock/releases/download/v0.9.0/gvproxy-darwin",
+    "sha256": "e2a6825ba789fe588828b418c09aaf16525dec6d8cb2d16c94e72535dd4606be",
+    "size": 26951570
+  },
+  {
+    "name": "tools/jre.tar.gz",
+    "url": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.21%2B9/OpenJDK17U-jre_aarch64_mac_hotspot_17.0.21_9.tar.gz",
+    "sha256": "a5ab5bacd6e719d5a5570580ed14dceb2ed532208a39af927906b9742da1745e",
+    "host": "arm64",
+    "size": 42822064
+  },
+  {
+    "name": "tools/jre.tar.gz",
+    "url": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.21%2B9/OpenJDK17U-jre_x64_mac_hotspot_17.0.21_9.tar.gz",
+    "sha256": "890214eb4d6c88dc06f990d5a6a3b72b91d5dffab6a0a6d8cffb98468bf26181",
+    "host": "x86_64",
+    "size": 37713920
+  }
+]

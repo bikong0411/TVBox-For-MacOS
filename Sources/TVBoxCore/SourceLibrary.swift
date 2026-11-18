@@ -7,14 +7,41 @@ public enum SourceImportTarget: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+public struct CSPComponentOverride: Codable, Equatable, Sendable {
+    public let api: String
+    public let component: CSPComponent
+    public init(api: String, component: CSPComponent) { self.api = api; self.component = component }
+}
+
 public struct SavedVODSource: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var origin: String
     public var configuration: Configuration
     public var selectedSiteID: String
+    public var componentOverrides: [String: CSPComponentOverride]? = nil
+    /// Stage a refresh from this subscription, without changing saved state.
+    /// The caller commits only after the new, verified component works.
+    public func refreshingCSP(_ configuration: Configuration, siteID: String) throws -> SavedVODSource {
+        guard let previous = self.configuration.sites.first(where: { $0.key == siteID }), previous.requiresCSP,
+              configuration.location == origin,
+              let current = configuration.sites.first(where: { $0.key == siteID }),
+              current.api == previous.api, current.requiresCSP,
+              let component = current.csp?.component,
+              component.algorithm != nil, component.digest != nil,
+              previous.csp?.component.algorithm != .sha256 || component.algorithm == .sha256 else {
+            throw CSPFailure.interfaceChanged
+        }
+        if componentOverrides?[siteID]?.api == previous.api { throw CSPFailure.localComponentMismatch }
+        var result = self
+        result.configuration = Configuration(name: configuration.name, location: configuration.location, sites: configuration.sites, subscriptions: configuration.subscriptions)
+        return result
+    }
     public func runtimeSite(_ key: String) -> Site? {
         guard var site = configuration.sites.first(where: { $0.key == key }) else { return nil }
+        if let override = componentOverrides?[key], override.api == site.api, let original = site.csp {
+            site.csp = try? CSPDefinition(component: override.component, api: site.api, extend: original.extend, configurationURL: original.configurationURL)
+        }
         // Identical CMS keys and video IDs in separate configurations must not
         // collide in favorites or playback history.
         site.key = id + "::" + site.key
@@ -74,7 +101,7 @@ public struct SourceLibrary: Codable, Sendable {
         if target == .live && !hasLive { throw TVError.message("这个配置没有直播频道、直播订阅或子配置。请选择点播源类型。") }
         guard hasVOD || hasLive else { throw TVError.message("配置中没有可保存的内容来源。") }
         let addVOD = target != .live && hasVOD
-        let shouldActivateVOD = activate && (configuration.sites.isEmpty || configuration.sites.contains(where: \.supported) || activeVOD?.configuration.sites.contains(where: \.supported) != true)
+        let shouldActivateVOD = activate && (configuration.sites.isEmpty || configuration.sites.contains(where: \.selectable) || activeVOD?.configuration.sites.contains(where: \.selectable) != true)
         // An untyped subscription list defaults to VOD. Choosing live explicitly
         // keeps its children in the live section instead.
         let addLive = target != .vod && hasLive && (target == .live || !configuration.feeds.isEmpty || !configuration.channels.isEmpty)
@@ -84,12 +111,12 @@ public struct SourceLibrary: Codable, Sendable {
             if let index = vodSources.firstIndex(where: { $0.origin == origin }) {
                 vodSources[index].configuration = Self.vodPayload(configuration)
                 if !customName.isEmpty { vodSources[index].name = customName }
-                if !configuration.sites.contains(where: { $0.id == vodSources[index].selectedSiteID && $0.supported }) {
-                    vodSources[index].selectedSiteID = configuration.sites.first(where: \.supported)?.id ?? ""
+                if !configuration.sites.contains(where: { $0.id == vodSources[index].selectedSiteID && $0.selectable }) {
+                    vodSources[index].selectedSiteID = configuration.sites.first(where: \.selectable)?.id ?? ""
                 }
                 if shouldActivateVOD { selectedVODID = vodSources[index].id }
             } else {
-                let item = SavedVODSource(id: UUID().uuidString, name: customName.isEmpty ? configuration.name : customName, origin: origin, configuration: Self.vodPayload(configuration), selectedSiteID: configuration.sites.first(where: \.supported)?.id ?? "")
+                let item = SavedVODSource(id: UUID().uuidString, name: customName.isEmpty ? configuration.name : customName, origin: origin, configuration: Self.vodPayload(configuration), selectedSiteID: configuration.sites.first(where: \.selectable)?.id ?? "")
                 vodSources.append(item)
                 if shouldActivateVOD || selectedVODID == nil { selectedVODID = item.id }
             }
@@ -155,7 +182,7 @@ public struct SourceLibrary: Codable, Sendable {
         if let id = selection.vodID { _ = selectVOD(id) }
         if let id = selection.liveID { _ = selectLive(id) }
         for index in vodSources.indices {
-            guard let id = selection.siteIDs[vodSources[index].id], vodSources[index].configuration.sites.contains(where: { $0.id == id && $0.supported }) else { continue }
+            guard let id = selection.siteIDs[vodSources[index].id], vodSources[index].configuration.sites.contains(where: { $0.id == id && $0.selectable }) else { continue }
             vodSources[index].selectedSiteID = id
         }
         normalizeSelections()
@@ -176,7 +203,7 @@ public struct SourceLibrary: Codable, Sendable {
         guard liveSources.contains(where: { $0.id == id }) else { return false }; selectedLiveID = id; return true
     }
     public mutating func selectSite(_ id: String) {
-        guard let index = vodSources.firstIndex(where: { $0.id == selectedVODID }), vodSources[index].configuration.sites.contains(where: { $0.id == id && $0.supported }) else { return }
+        guard let index = vodSources.firstIndex(where: { $0.id == selectedVODID }), vodSources[index].configuration.sites.contains(where: { $0.id == id && $0.selectable }) else { return }
         vodSources[index].selectedSiteID = id
     }
     public mutating func removeVOD(_ id: String) { vodSources.removeAll { $0.id == id }; normalizeSelections() }
@@ -189,6 +216,18 @@ public struct SourceLibrary: Codable, Sendable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let index = liveSources.firstIndex(where: { $0.id == id }) else { return }; liveSources[index].name = trimmed
     }
+    /// A local correction is scoped to one source, site key and exact API.
+    /// Subscription refreshes preserve it; changing the source URL discards it.
+    public mutating func setCSPComponent(_ component: CSPComponent?, sourceID: String, siteID: String) throws {
+        guard let index = vodSources.firstIndex(where: { $0.id == sourceID }),
+              let site = vodSources[index].configuration.sites.first(where: { $0.key == siteID }), site.requiresCSP else {
+            throw TVError.message("未找到可修改组件的 CSP 接口，请刷新配置后重试。")
+        }
+        var overrides = vodSources[index].componentOverrides ?? [:]
+        if let component { overrides[siteID] = CSPComponentOverride(api: site.api, component: component) }
+        else { overrides.removeValue(forKey: siteID) }
+        vodSources[index].componentOverrides = overrides.isEmpty ? nil : overrides
+    }
     /// Replace one saved entry without importing/activating other entries from
     /// the new configuration. IDs scope history and must remain stable.
     public mutating func replaceVOD(_ id: String, configuration: Configuration, name: String) throws {
@@ -198,10 +237,11 @@ public struct SourceLibrary: Codable, Sendable {
         guard !configuration.sites.isEmpty || !configuration.subscriptions.isEmpty else { throw TVError.message("新地址没有点播接口或子配置，原点播源已保留。") }
         guard !vodSources.contains(where: { $0.id != id && $0.origin == configuration.location }) else { throw TVError.message("这个点播地址已经存在，请选择已有的源，或使用其他地址。") }
         var updated = vodSources[index]
+        if updated.origin != configuration.location { updated.componentOverrides = nil }
         updated.name = label; updated.origin = configuration.location
         updated.configuration = Self.vodPayload(configuration)
-        if !configuration.sites.contains(where: { $0.id == updated.selectedSiteID && $0.supported }) {
-            updated.selectedSiteID = configuration.sites.first(where: \.supported)?.id ?? ""
+        if !configuration.sites.contains(where: { $0.id == updated.selectedSiteID && $0.selectable }) {
+            updated.selectedSiteID = configuration.sites.first(where: \.selectable)?.id ?? ""
         }
         vodSources[index] = updated
     }

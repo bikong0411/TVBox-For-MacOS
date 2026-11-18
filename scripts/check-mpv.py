@@ -12,5 +12,5 @@ if not (folder.parent/"Frameworks").exists(): (folder.parent/"Frameworks").symli
 binary = folder/"check-mpv"
 sources = sorted(p for p in (root/"Sources/TVBoxMac").glob("*.swift") if p.name != "TVBoxMacApp.swift")
 objects = list((build/"TVBoxCore.build").glob("*.o")) + list((build/"MPVBridge.build").glob("*.o"))
-subprocess.run(["swiftc","-O","-parse-as-library","-target",f"{architecture}-apple-macosx13.0","-I",str(build/"Modules"),"-Xcc","-fmodule-map-file="+str(build/"MPVBridge.build/module.modulemap"),"-I",str(root/"Sources/MPVBridge/include"),"-F",str(frameworks),"-framework","VLCKit","-Xlinker","-rpath","-Xlinker",str(frameworks),*map(str,sources),str(root/"scripts/check-mpv.swift"),*map(str,objects),"-o",str(binary)],check=True)
+subprocess.run(["swiftc","-O","-parse-as-library","-target",f"{architecture}-apple-macosx13.0","-I",str(build/"Modules"),"-Xcc","-fmodule-map-file="+str(build/"MPVBridge.build/module.modulemap"),"-I",str(root/"Sources/MPVBridge/include"),"-F",str(frameworks),"-framework","VLCKit","-framework","Sparkle","-Xlinker","-rpath","-Xlinker",str(frameworks),*map(str,sources),str(root/"scripts/check-mpv.swift"),*map(str,objects),"-o",str(binary)],check=True)
 subprocess.run(["arch",f"-{architecture}",str(binary),"--ui-test","--ui-test-suite","local.tvboxmac.mpv.check."+uuid.uuid4().hex],cwd=root,check=True,timeout=120)

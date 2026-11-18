@@ -13,10 +13,10 @@ struct CastingPicker: View {
         Button { presented.toggle() } label: {
             HStack(spacing: 4) {
                 PlayerControlIcon(name: "airplayvideo")
-                Text(casting.connected || controller.airPlayConnected ? "投屏中" : controller.airPlayPreparing ? "连接中" : "投屏")
+                Text(casting.connected || controller.airPlayConnected ? L10n.text("投屏中") : controller.airPlayPreparing ? L10n.text("连接中") : L10n.text("投屏"))
                     .font(.system(size: 11, weight: .medium))
             }.foregroundStyle(casting.connected || controller.airPlayConnected ? Theme.accent : .white)
-        }.help("投屏到安卓电视（DLNA）或 Apple TV（AirPlay）")
+        }.help(L10n.text("投屏到安卓电视（DLNA）或 Apple TV（AirPlay）"))
         .popover(isPresented: $presented, arrowEdge: .top) {
             CastingPanel(controller: controller, surface: surface, casting: casting, appleTV: $appleTV) { active in
                 onPresentationChange(active || presented)
@@ -50,75 +50,75 @@ struct CastingPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("投屏到电视").font(.system(size: 16, weight: .semibold))
-                Picker("电视类型", selection: $appleTV) {
-                    Text("安卓电视 · DLNA").tag(false)
-                    Text("AirPlay 电视").tag(true)
+                Text(L10n.text("投屏到电视")).font(.system(size: 16, weight: .semibold))
+                Picker(L10n.text("电视类型"), selection: $appleTV) {
+                    Text(L10n.text("安卓电视 · DLNA")).tag(false)
+                    Text(L10n.text("AirPlay 电视")).tag(true)
                 }.pickerStyle(.segmented).labelsHidden()
             }.padding(18)
             Divider().overlay(Theme.line)
             ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 14) {
                 if appleTV {
-                    Text("Mac 和电视需连接同一网络，并在电视上开启 AirPlay。首次连接请确认电视上的配对码。")
+                    Text(L10n.text("Mac 和电视需连接同一网络，并在电视上开启 AirPlay。首次连接请确认电视上的配对码。"))
                         .font(.callout).foregroundStyle(.secondary)
                     HStack {
                         AirPlayRoutePicker(player: controller.player) { active in
                             if active { controller.prepareAirPlayRoute() }
                             onPresentationChange(active)
                         }.frame(width: 36, height: 36)
-                        Text(controller.airPlayConnected ? "正在通过 AirPlay 播放" : controller.airPlayPreparing ? "正在准备 AirPlay 视频…" : "系统 AirPlay")
+                        Text(controller.airPlayConnected ? L10n.text("正在通过 AirPlay 播放") : controller.airPlayPreparing ? L10n.text("正在准备 AirPlay 视频…") : L10n.text("系统 AirPlay"))
                     }.disabled(!controller.ready || casting.selectedDevice != nil)
                     if casting.selectedDevice != nil {
-                        Text("请先结束当前电视投屏，再使用系统 AirPlay。").font(.caption).foregroundStyle(.secondary)
+                        Text(L10n.text("请先结束当前电视投屏，再使用系统 AirPlay。")).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(controller.airPlayMessage ?? "选中设备后切换播放通道；选择“此 Mac”可结束投屏。")
+                    Text(controller.airPlayMessage ?? L10n.text("选中设备后切换播放通道；选择“此 Mac”可结束投屏。"))
                         .font(.caption).foregroundStyle(.secondary)
                     if let diagnostic = controller.airPlayDiagnostic {
-                        DisclosureGroup("错误详情") { Text(diagnostic).font(.caption).textSelection(.enabled) }
+                        DisclosureGroup(L10n.text("错误详情")) { Text(diagnostic).font(.caption).textSelection(.enabled) }
                     }
-                    if controller.airPlayPreparing { Button("取消 AirPlay 准备") { controller.cancelAirPlayPreparation() } }
+                    if controller.airPlayPreparing { Button(L10n.text("取消 AirPlay 准备")) { controller.cancelAirPlayPreparation() } }
                     Divider()
                     HStack {
-                        Text("兼容连接").font(.callout.weight(.medium))
+                        Text(L10n.text("兼容连接")).font(.callout.weight(.medium))
                         Spacer()
                         if casting.airPlaySearching { ProgressView().controlSize(.small) }
-                        Button("重新搜索") { casting.searchAirPlay() }.disabled(casting.airPlaySearching)
+                        Button(L10n.text("重新搜索")) { casting.searchAirPlay() }.disabled(casting.airPlaySearching)
                     }
-                    Text("系统 AirPlay 播放失败时，请选择下方电视。投屏期间保持 Mac 在线。")
+                    Text(L10n.text("系统 AirPlay 播放失败时，请选择下方电视。投屏期间保持 Mac 在线。"))
                         .font(.caption).foregroundStyle(.secondary)
                     if casting.airPlayDevices.isEmpty {
-                        Text(casting.airPlaySearching ? "正在搜索同一网络中的兼容电视…" : "未找到兼容连接。需要配对的设备请使用上方系统 AirPlay。")
+                        Text(casting.airPlaySearching ? L10n.text("正在搜索同一网络中的兼容电视…") : L10n.text("未找到兼容连接。需要配对的设备请使用上方系统 AirPlay。"))
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         VStack(spacing: 6) { ForEach(casting.airPlayDevices) { device in deviceRow(device) } }
                     }
                     if let device = casting.selectedDevice, device.isAirPlayVideo {
                         Text(casting.error ?? casting.status).font(.caption).foregroundStyle(.secondary)
-                        Button(casting.connecting ? "取消投屏" : "返回本机播放") { controller.returnToLocal() }
-                        Text("音量请使用电视遥控器调整。").font(.caption).foregroundStyle(.secondary)
+                        Button(casting.connecting ? L10n.text("取消投屏") : L10n.text("返回本机播放")) { controller.returnToLocal() }
+                        Text(L10n.text("音量请使用电视遥控器调整。")).font(.caption).foregroundStyle(.secondary)
                     } else if let error = casting.error { Text(error).font(.caption).foregroundStyle(Theme.accent) }
                 } else {
                     HStack {
-                        Text(casting.searching ? "正在搜索同一网络中的电视…" : "可用设备").font(.callout)
+                        Text(casting.searching ? L10n.text("正在搜索同一网络中的电视…") : L10n.text("可用设备")).font(.callout)
                         Spacer()
                         if casting.searching { ProgressView().controlSize(.small) }
-                        Button("重新搜索") { casting.search() }.disabled(casting.searching)
+                        Button(L10n.text("重新搜索")) { casting.search() }.disabled(casting.searching)
                     }
                     if casting.devices.isEmpty {
-                        Text(casting.searching ? "搜索大约需要几秒钟。" : "没有找到电视。请确认连接同一 Wi-Fi，并在电视上开启 DLNA / 多屏互动。")
+                        Text(casting.searching ? L10n.text("搜索大约需要几秒钟。") : L10n.text("没有找到电视。请确认连接同一 Wi-Fi，并在电视上开启 DLNA / 多屏互动。"))
                             .foregroundStyle(.secondary).font(.callout).frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
                     } else {
                         VStack(spacing: 6) { ForEach(casting.devices) { device in deviceRow(device) } }
                     }
-                    if !controller.ready { Text("视频连接成功后即可投屏。设备搜索可提前进行。").font(.caption).foregroundStyle(.secondary) }
-                    if surface.externalPlaybackActive { Text("请先在 AirPlay 中选择“此 Mac”，再使用 DLNA。").font(.caption).foregroundStyle(.secondary) }
+                    if !controller.ready { Text(L10n.text("视频连接成功后即可投屏。设备搜索可提前进行。")).font(.caption).foregroundStyle(.secondary) }
+                    if surface.externalPlaybackActive { Text(L10n.text("请先在 AirPlay 中选择“此 Mac”，再使用 DLNA。")).font(.caption).foregroundStyle(.secondary) }
                     if let error = casting.error { Text(error).font(.callout).foregroundStyle(Theme.accent) }
                     if casting.selectedDevice != nil {
                         Text(casting.status).font(.caption).foregroundStyle(.secondary)
-                        Button(casting.connecting ? "取消投屏" : "返回本机播放") { controller.returnToLocal() }
+                        Button(casting.connecting ? L10n.text("取消投屏") : L10n.text("返回本机播放")) { controller.returnToLocal() }
                     }
-                    Text("投屏期间请保持 Mac 在线。MP4、HLS 的兼容性较好，具体格式由电视决定。")
+                    Text(L10n.text("投屏期间请保持 Mac 在线。MP4、HLS 的兼容性较好，具体格式由电视决定。"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -157,9 +157,9 @@ struct DLNAPlaybackStatus: View {
             VStack(spacing: 10) {
                 if casting.connecting { ProgressView() } else { Image(systemName: "tv").font(.title2) }
                 Text(device.name).font(.headline)
-                Text(device.isAirPlayVideo ? "AirPlay · 兼容连接" : "DLNA").font(.caption).foregroundStyle(.secondary)
+                Text(device.isAirPlayVideo ? L10n.text("AirPlay · 兼容连接") : "DLNA").font(.caption).foregroundStyle(.secondary)
                 Text(casting.error ?? casting.status).font(.callout).multilineTextAlignment(.center)
-                Button(casting.connecting ? "取消投屏" : "返回本机播放") { controller.returnToLocal() }
+                Button(casting.connecting ? L10n.text("取消投屏") : L10n.text("返回本机播放")) { controller.returnToLocal() }
             }.padding(22).frame(maxWidth: 350)
                 .foregroundStyle(.white).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
         }
@@ -175,9 +175,9 @@ struct PlaybackConnectionStatus: View {
             VStack(spacing: 11) {
                 ProgressView().controlSize(.regular)
                 Text(controller.connectingMessage).font(.system(size: 14, weight: .medium))
-                Text(elapsed >= 8 ? "片源响应较慢，仍在尝试连接 · \(elapsed) 秒" : "首次加载可能需要几秒钟")
+                Text(elapsed >= 8 ? L10n.text("片源响应较慢，仍在尝试连接 · \(elapsed) 秒") : L10n.text("首次加载可能需要几秒钟"))
                     .font(.system(size: 11)).foregroundStyle(.white.opacity(0.65))
-                Button("取消播放", action: onCancel).font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(Theme.accent)
+                Button(L10n.text("取消播放"), action: onCancel).font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(Theme.accent)
             }.padding(22).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
         }
     }

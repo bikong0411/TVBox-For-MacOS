@@ -58,11 +58,35 @@ public enum Parser {
             var key = string(raw["key"]); if key.isEmpty { key = "site-\(index)" }
             if keys.contains(key) { key += "-\(index)" }; keys.insert(key)
             let rawAPI = string(raw["api"])
-            result.sites.append(Site(key: key, name: string(raw["name"]).isEmpty ? key : string(raw["name"]), type: Int(string(raw["type"])) ?? 1, api: rawAPI.hasPrefix("csp_") ? rawAPI : resolve(rawAPI, base: base), searchable: string(raw["searchable"]) != "0", headers: raw["header"] as? [String: String] ?? [:]))
+            let type = Int(string(raw["type"])) ?? 1
+            var csp: CSPDefinition?
+            if type == 3, rawAPI.hasPrefix("csp_") {
+                let jar = string(raw["jar"]).isEmpty ? string(root["spider"]) : string(raw["jar"])
+                let ext: String
+                if let value = raw["ext"] as? String { ext = value }
+                else if let value = raw["ext"], JSONSerialization.isValidJSONObject(value) {
+                    ext = String(data: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]), encoding: .utf8) ?? ""
+                } else { ext = "" }
+                csp = try? CSPDefinition(component: CSPComponent(jar, base: base), api: rawAPI, extend: ext, configurationURL: base)
+            }
+            result.sites.append(Site(key: key, name: string(raw["name"]).isEmpty ? key : string(raw["name"]), type: type, api: rawAPI.hasPrefix("csp_") ? rawAPI : resolve(rawAPI, base: base), searchable: string(raw["searchable"]) != "0", headers: raw["header"] as? [String: String] ?? [:], csp: csp))
+        }
+        // Multi-repository catalogs must remain references to their original
+        // configurations: flattening sites loses each repository's spider/base.
+        var subscriptionURLs = Set<String>()
+        func appendSubscription(name: String, address: String) {
+            let resolved = resolve(address.trimmingCharacters(in: .whitespacesAndNewlines), base: base)
+            guard !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let url = URL(string: resolved), ["http", "https", "file"].contains(url.scheme?.lowercased() ?? ""),
+                  url.isFileURL || url.host != nil, subscriptionURLs.insert(resolved).inserted else { return }
+            let fallback = url.deletingPathExtension().lastPathComponent.isEmpty ? (url.host ?? "内容仓库") : url.deletingPathExtension().lastPathComponent
+            result.subscriptions.append(Subscription(name: name.isEmpty ? fallback : name, url: resolved))
         }
         for raw in (root["urls"] as? [[String: Any]]) ?? [] {
-            let url = resolve(string(raw["url"]), base: base)
-            if !url.isEmpty { result.subscriptions.append(Subscription(name: string(raw["name"]).isEmpty ? url : string(raw["name"]), url: url)) }
+            appendSubscription(name: string(raw["name"]), address: string(raw["url"]))
+        }
+        for raw in (root["storeHouse"] as? [[String: Any]]) ?? [] {
+            appendSubscription(name: string(raw["sourceName"]), address: string(raw["sourceUrl"]))
         }
         for raw in (root["lives"] as? [[String: Any]]) ?? [] {
             let name = string(raw["name"])
@@ -87,7 +111,7 @@ public enum Parser {
             }
         }
         guard !result.sites.isEmpty || !result.feeds.isEmpty || !result.channels.isEmpty || !result.subscriptions.isEmpty else {
-            throw TVError.message("没有找到 sites、lives 或 urls。请确认填写的是 TVBox 配置地址。")
+            throw TVError.message("没有找到接口、直播列表或有效的仓库目录。请确认填写的是 TVBox 配置地址。")
         }
         return result
     }
@@ -148,7 +172,7 @@ public enum Parser {
         return result.filter { seen.insert($0.id).inserted }
     }
 
-    public static func lines(names: String, urls: String, base: URL? = nil) -> [PlayLine] {
+    public static func lines(names: String, urls: String, base: URL? = nil, resolveEpisodeURLs: Bool = true) -> [PlayLine] {
         let labels = names.components(separatedBy: "$$$")
         return urls.components(separatedBy: "$$$").enumerated().compactMap { index, group in
             let episodes = group.components(separatedBy: "#").enumerated().compactMap { offset, item -> Episode? in
@@ -156,7 +180,7 @@ public enum Parser {
                 // URL query strings may contain '$'; split only the episode-name delimiter.
                 let parts = item.split(separator: "$", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
                 let url = parts.count == 2 ? parts[1] : parts[0]
-                return Episode(name: parts.count == 2 ? parts[0] : "第 \(offset + 1) 集", url: resolve(url, base: base))
+                return Episode(name: parts.count == 2 ? parts[0] : "第 \(offset + 1) 集", url: resolveEpisodeURLs ? resolve(url, base: base) : url)
             }
             guard !episodes.isEmpty else { return nil }
             let label = index < labels.count && !labels[index].isEmpty ? labels[index] : "线路 \(index + 1)"
@@ -164,7 +188,7 @@ public enum Parser {
         }
     }
 
-    public static func catalog(_ data: Data, base: URL? = nil) throws -> Catalog {
+    public static func catalog(_ data: Data, base: URL? = nil, resolveEpisodeURLs: Bool = true) throws -> Catalog {
         if String(data: data.prefix(200), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<") == true {
             let delegate = XMLCatalog(base: base); let parser = XMLParser(data: data); parser.delegate = delegate
             parser.shouldResolveExternalEntities = false
@@ -176,7 +200,7 @@ public enum Parser {
         let categories = ((root["class"] as? [[String: Any]]) ?? []).map { Category(id: string($0["type_id"]), name: string($0["type_name"])) }
         let videos = ((root["list"] as? [[String: Any]]) ?? []).compactMap { raw -> Video? in
             let id = string(raw["vod_id"]); guard !id.isEmpty else { return nil }
-            return Video(id: id, title: string(raw["vod_name"]), poster: resolve(string(raw["vod_pic"]), base: base), note: string(raw["vod_remarks"]), year: string(raw["vod_year"]), area: string(raw["vod_area"]), director: string(raw["vod_director"]), actor: string(raw["vod_actor"]), summary: plainText(string(raw["vod_content"])), lines: lines(names: string(raw["vod_play_from"]), urls: string(raw["vod_play_url"]), base: base))
+            return Video(id: id, title: string(raw["vod_name"]), poster: resolve(string(raw["vod_pic"]), base: base), note: string(raw["vod_remarks"]), year: string(raw["vod_year"]), area: string(raw["vod_area"]), director: string(raw["vod_director"]), actor: string(raw["vod_actor"]), summary: plainText(string(raw["vod_content"])), lines: lines(names: string(raw["vod_play_from"]), urls: string(raw["vod_play_url"]), base: base, resolveEpisodeURLs: resolveEpisodeURLs))
         }
         return Catalog(videos: videos, categories: categories, page: Int(string(root["page"])) ?? 1, pageCount: max(1, Int(string(root["pagecount"])) ?? 1))
     }

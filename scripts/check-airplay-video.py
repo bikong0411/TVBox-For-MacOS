@@ -58,7 +58,7 @@ if not (folder.parent/'Frameworks').exists():(folder.parent/'Frameworks').symlin
 sources=sorted(p for p in (root/'Sources/TVBoxMac').glob('*.swift') if p.name!='TVBoxMacApp.swift')
 objects=list((build/'TVBoxCore.build').glob('*.o'))+list((build/'MPVBridge.build').glob('*.o'))
 binary=folder/'check-airplay-video'
-subprocess.run(['swiftc','-O','-parse-as-library','-target',f'{arch}-apple-macosx13.0','-I',str(build/'Modules'),'-Xcc','-fmodule-map-file='+str(build/'MPVBridge.build/module.modulemap'),'-I',str(root/'Sources/MPVBridge/include'),'-F',str(frameworks),'-framework','VLCKit',*map(str,sources),str(root/'scripts/check-airplay-video.swift'),*map(str,objects),'-o',str(binary)],check=True)
+subprocess.run(['swiftc','-O','-parse-as-library','-target',f'{arch}-apple-macosx13.0','-I',str(build/'Modules'),'-Xcc','-fmodule-map-file='+str(build/'MPVBridge.build/module.modulemap'),'-I',str(root/'Sources/MPVBridge/include'),'-F',str(frameworks),'-framework','VLCKit','-framework','Sparkle',*map(str,sources),str(root/'scripts/check-airplay-video.swift'),*map(str,objects),'-o',str(binary)],check=True)
 if '--real-device' in sys.argv:
     subprocess.run(['/opt/homebrew/bin/ffmpeg','-loglevel','error','-i',str(root/'.build/test.mp4'),'-t','20','-an','-c:v','copy','-movflags','+faststart','-y',str(root/'.build/airplay-controller-test.mp4')],check=True)
     subprocess.run(['arch',f'-{arch}',str(binary),'--real-device'],cwd=root,check=True,timeout=100)

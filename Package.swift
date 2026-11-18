@@ -7,9 +7,10 @@ let package = Package(
     products: [.executable(name: "TVBoxMac", targets: ["TVBoxMac"])],
     targets: [
         .binaryTarget(name: "VLCKit", path: "Vendor/VLCKit.xcframework"),
+        .binaryTarget(name: "Sparkle", path: "Vendor/Sparkle.xcframework"),
         .target(name: "TVBoxCore"),
         .target(name: "MPVBridge", exclude: ["MPV-API-LICENSE.txt"], publicHeadersPath: "include"),
-        .executableTarget(name: "TVBoxMac", dependencies: ["TVBoxCore", "VLCKit", "MPVBridge"],
+        .executableTarget(name: "TVBoxMac", dependencies: ["TVBoxCore", "VLCKit", "Sparkle", "MPVBridge"],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "TVBoxCoreTests", dependencies: ["TVBoxCore"])
     ],

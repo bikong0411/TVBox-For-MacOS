@@ -17,19 +17,20 @@ import AppKit
         .defaultSize(width: 1240, height: 820)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) { CheckForAppUpdatesMenu(updates: store.updates) }
             CommandGroup(replacing: .newItem) {
-                Button("打开视频文件…") { store.openVideoFile() }.keyboardShortcut("o")
-                Button("打开视频地址…") { store.directSheet = true }.keyboardShortcut("o", modifiers: [.command, .shift])
+                Button(L10n.text("打开视频文件…")) { store.openVideoFile() }.keyboardShortcut("o")
+                Button(L10n.text("打开视频地址…")) { store.directSheet = true }.keyboardShortcut("o", modifiers: [.command, .shift])
                 Divider()
-                Button("添加内容源…") { store.showImport() }.keyboardShortcut("i", modifiers: [.command, .shift])
-                Button("导入配置文件…") { store.importFile() }
+                Button(L10n.text("添加内容源…")) { store.showImport() }.keyboardShortcut("i", modifiers: [.command, .shift])
+                Button(L10n.text("导入配置文件…")) { store.importFile() }
             }
-            CommandMenu("播放") {
-                Button("切换播放全屏") { store.fullscreen.toggle(store: store) }.keyboardShortcut("f", modifiers: [.command, .control]).disabled(store.playback == nil)
+            CommandMenu(L10n.text("播放菜单")) {
+                Button(L10n.text("切换播放全屏")) { store.fullscreen.toggle(store: store) }.keyboardShortcut("f", modifiers: [.command, .control]).disabled(store.playback == nil)
                 Divider()
-                Button("播放 / 暂停") { store.player.togglePlayback() }.keyboardShortcut(.space, modifiers: []).disabled(store.playback == nil)
-                Button("下一集") { store.nextEpisode() }.keyboardShortcut(.rightArrow, modifiers: [.command])
-                Button("停止播放") { store.stop() }.keyboardShortcut(".")
+                Button(L10n.text("播放 / 暂停")) { store.player.togglePlayback() }.keyboardShortcut(.space, modifiers: []).disabled(store.playback == nil)
+                Button(L10n.text("下一集")) { store.nextEpisode() }.keyboardShortcut(.rightArrow, modifiers: [.command])
+                Button(L10n.text("停止播放")) { store.stop() }.keyboardShortcut(".")
             }
         }
     }
