@@ -78,6 +78,65 @@ private actor CSPFixture: CSPTransport {
             #expect(throws: (any Error).self) { try CSPPlayback(data: Data(value.utf8)) }
         }
     }
+    @Test(arguments: [
+        (#"{"url":"","msg":"请先登录后播放。","code":403}"#, "要求登录"),
+        (#"{"error":{"status":403}}"#, "拒绝访问"),
+        (#"{"code":"404"}"#, "找不到该视频"),
+        (#"{"url":"链接已过期"}"#, "链接已失效"),
+        (#"{"statusCode":504}"#, "请求超时"),
+        (#"{"error":"RATE_LIMITED"}"#, "限制了请求频率"),
+        (#"{"status":503}"#, "服务暂不可用"),
+        (#"{"url":null,"msg":"未知错误 token=private"}"#, "未返回本线路的播放地址"),
+        (#"{"url":"   ","message":"不需要登录"}"#, "未返回本线路的播放地址"),
+        (#"{"url":[]}"#, "播放地址格式不正确"),
+        (#"{"url":"401"}"#, "播放地址格式不正确"),
+        (#"{"url":"file:///somewhere"}"#, "不支持的协议"),
+        (#"{"parse":1}"#, "需要网页解析"),
+        ("not json", "播放结果格式无效"),
+    ]) func explainsPlaybackFailureUsingSourceResponse(value: String, expected: String) {
+        do {
+            _ = try CSPPlayback(data: Data(value.utf8))
+            Issue.record("Expected the source response to fail")
+        } catch {
+            #expect(error.localizedDescription.contains(expected))
+            #expect(!error.localizedDescription.contains("token=private"))
+        }
+    }
+    @Test func keepsValidPlaybackWithInformationalMetadata() throws {
+        let value = #"{"url":"https://video.invalid/clip.mp4","msg":"需要会员","code":1}"#
+        #expect(try CSPPlayback(data: Data(value.utf8)).url.absoluteString == "https://video.invalid/clip.mp4")
+    }
+    @Test func sourceCanReturnAQRCodeInsteadOfPlayback() throws {
+        let payload = "https://auth.example.invalid/scan?fixture=1"
+        let responses = [
+            (#"{"url":"","qrcode":"https://auth.example.invalid/scan?fixture=1"}"#, CSPPlaybackAuthorization.code(payload)),
+            (#"{"parse":1,"url":"https://auth.example.invalid/sign-in","auth":{"qrCode":"https://auth.example.invalid/scan?fixture=1"}}"#, .code(payload)),
+            (#"{"auth":{"qr_image":"data:image/png;base64,iVBORw0KGgo="}}"#, .image(Data([137, 80, 78, 71, 13, 10, 26, 10]))),
+        ]
+        for (response, expected) in responses {
+            do {
+                _ = try CSPPlayback(data: Data(response.utf8))
+                Issue.record("Expected a QR authorization challenge")
+            } catch {
+                #expect((error as? CSPPlaybackAuthorization) == expected)
+                #expect(!error.localizedDescription.contains(payload))
+            }
+        }
+    }
+    @Test func ignoresInvalidOrIrrelevantQRCodeFields() throws {
+        let valid = #"{"url":"https://video.invalid/clip.mp4","qrcode":"stale"}"#
+        #expect(try CSPPlayback(data: Data(valid.utf8)).url.host == "video.invalid")
+        for qr in ["", "DATA:image/svg+xml;base64,AA==", String(repeating: "x", count: 1025)] {
+            let bytes = try JSONSerialization.data(withJSONObject: ["code": 401, "qrcode": qr])
+            do {
+                _ = try CSPPlayback(data: bytes)
+                Issue.record("Expected a login error without a QR code")
+            } catch {
+                #expect(!(error is CSPPlaybackAuthorization))
+                #expect(error.localizedDescription.contains("要求登录"))
+            }
+        }
+    }
     @Test func rpcConnectionAcceptsOnlyPrivateLoopbackAndStrongSessionTokens() throws {
         let token = String(repeating: "a", count: 64)
         _ = try CSPWorkerConnection(endpoint: URL(string: "http://127.0.0.1:18793")!, token: token)

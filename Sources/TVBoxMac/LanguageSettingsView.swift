@@ -21,7 +21,9 @@ import AppKit
 
 struct LanguageSettingsView: View {
     @ObservedObject private var settings = LanguageSettings.shared
-    @State private var confirmQuit = false
+    @ObservedObject var updates: AppUpdateController
+    @State private var confirmRestart = false
+    @State private var restartFailed = false
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
             Label(L10n.text("界面设置"), systemImage: "globe").font(.system(size: 17, weight: .semibold))
@@ -36,18 +38,64 @@ struct LanguageSettingsView: View {
                 .font(.system(size: 11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             if settings.needsReopen {
                 HStack(spacing: 12) {
-                    Text(L10n.text("已保存，重新打开 TVBox 后生效。"))
+                    Text(L10n.text("已保存，重启 TVBox 后生效。"))
                         .font(.system(size: 12)).foregroundStyle(Theme.accent)
                     Spacer()
-                    Button(L10n.text("退出 TVBox…")) { confirmQuit = true }
+                    Button(L10n.text("重启 TVBox…")) { confirmRestart = true }
                 }
             }
         }.padding(20).background(Theme.panel, in: RoundedRectangle(cornerRadius: 11))
-        .confirmationDialog(L10n.text("退出 TVBox 以应用语言设置？"), isPresented: $confirmQuit, titleVisibility: .visible) {
-            Button(L10n.text("退出 TVBox")) { NSApp.terminate(nil) }
+        .confirmationDialog(L10n.text("重启 TVBox 以应用语言设置？"), isPresented: $confirmRestart, titleVisibility: .visible) {
+            Button(L10n.text("重启 TVBox")) { restart() }
             Button(L10n.text("稍后"), role: .cancel) { }
         } message: {
-            Text(L10n.text("播放进度会保存。退出后重新打开 TVBox，即可使用所选语言。"))
+            Text(updates.readyOnQuit
+                 ? L10n.text("播放进度会保存，已下载的更新会在重启时安装。")
+                 : L10n.text("播放进度会保存。重启后将使用所选语言。"))
         }
+        .alert(L10n.text("无法自动重启 TVBox"), isPresented: $restartFailed) {
+            Button(L10n.text("知道了"), role: .cancel) { }
+        } message: {
+            Text(L10n.text("语言设置已保存，请退出并重新打开 TVBox。"))
+        }
+    }
+
+    private func restart() {
+        if updates.readyOnQuit {
+            updates.installPreparedUpdate()
+            return
+        }
+        do {
+            try AppRelaunch.schedule()
+            NSApp.terminate(nil)
+        } catch {
+            restartFailed = true
+        }
+    }
+}
+
+private enum AppRelaunch {
+    static func schedule() throws {
+        let app = Bundle.main.bundleURL
+        guard app.pathExtension.lowercased() == "app" else { throw CocoaError(.executableNotLoadable) }
+        let info = ProcessInfo.processInfo
+        let helper = Process()
+        helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // Wait for normal termination, including playback and preference cleanup.
+        helper.arguments = ["-c", """
+            pid=$1
+            app=$2
+            shift 2
+            for i in $(/usr/bin/seq 120); do
+                if ! kill -0 "$pid" 2>/dev/null; then
+                    exec /usr/bin/open -a "$app" "$@"
+                fi
+                /bin/sleep 0.25
+            done
+            """, "tvbox-relaunch", String(info.processIdentifier), app.path]
+        if info.arguments.contains("--ui-test") {
+            helper.arguments?.append(contentsOf: ["--args"] + info.arguments.dropFirst())
+        }
+        try helper.run()
     }
 }

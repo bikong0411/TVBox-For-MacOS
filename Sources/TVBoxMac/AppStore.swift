@@ -344,6 +344,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         connectionStartedAt = Date(); connectingMessage = "正在解析播放地址…"
     }
     @Published var error: String?
+    @Published var playbackAuthorization: CSPPlaybackAuthorization?
     @Published var failure: PlaybackFailure?
     @Published var ready = false
     @Published var rate: Float = 1
@@ -773,6 +774,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         systemPlayback = false; storedVideoSurface?.setSystemPlayback(false)
     }
     private func clearAttempt() {
+        playbackAuthorization = nil
         cancelAirPlayPreparation()
         mpvLoadTask?.cancel(); mpvLoadTask = nil
         mpvNetworkTask?.cancel(); mpvNetworkTask = nil
@@ -1238,7 +1240,8 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                 startInternalPlayback(position: position)
             } catch {
                 guard !Task.isCancelled, resolutionID == token, playback != nil else { return }
-                player.error = error.localizedDescription
+                player.error = L10n.string(error.localizedDescription)
+                player.playbackAuthorization = error as? CSPPlaybackAuthorization
             }
         }
     }

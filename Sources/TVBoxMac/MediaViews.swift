@@ -261,7 +261,15 @@ struct PlaybackSurface: View {
         if let current = store.playback {
             ZStack {
                 Color.black
-                if !fullscreen.isPresented || isFullscreen {
+                let isActiveSurface = !fullscreen.isPresented || isFullscreen
+                if isActiveSurface, let authorization = controller.playbackAuthorization {
+                    PlaybackAuthorizationPrompt(
+                        authorization: authorization,
+                        sourceName: current.site?.name ?? current.line.name,
+                        retry: { store.retryPlayback() },
+                        dismiss: { controller.playbackAuthorization = nil }
+                    )
+                } else if isActiveSurface {
                 NativePlayerView(surface: controller.videoSurface, isFullscreen: isFullscreen, onSeek: { offset in
                     guard (!current.isLive || current.catchupProgramme != nil), controller.seekRelative(by: offset) else { return false }
                     NotificationCenter.default.post(name: .playerSurfacePointerActivity, object: controller.videoSurface)

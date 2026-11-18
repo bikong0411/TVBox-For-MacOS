@@ -41,7 +41,7 @@ struct TVBoxMacApp: App {
             }
         }
         Settings {
-            LanguageSettingsView().padding(24).frame(width: 560)
+            LanguageSettingsView(updates: store.updates).padding(24).frame(width: 560)
                 .background(Theme.background).tint(Theme.accent).preferredColorScheme(.dark)
         }
     }
