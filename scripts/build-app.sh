@@ -9,6 +9,15 @@ case "$TARGET" in
     --universal|universal) ARCHES=(arm64 x86_64); LABEL=Universal ;;
     *) echo "Usage: build-app.sh [arm64|intel|--universal]" >&2; exit 1 ;;
 esac
+RUNTIME_ARCH="${ARCHES[0]}"
+if [[ "${#ARCHES[@]}" -gt 1 ]]; then RUNTIME_ARCH=universal; fi
+if [[ ! -s "$PROJECT_DIR/Vendor/CSPRuntime/manifest.json" ]]; then
+    echo "CSP runtime is missing. Run python3 scripts/prepare-csp-runtime.py --arch $RUNTIME_ARCH before building the full application." >&2
+    if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+        echo "::error::Use the updated .github/workflows/main.yml, including the Build standalone CSP runtime step." >&2
+    fi
+    exit 1
+fi
 bash scripts/prepare-dependencies.sh
 BINS=()
 for ARCH in "${ARCHES[@]}"; do
@@ -26,12 +35,7 @@ cp "$PROJECT_DIR/Resources/VLCKit-LICENSE.txt" "$APP_DIR/Contents/Resources/VLCK
 cp "$PROJECT_DIR/Sources/MPVBridge/MPV-API-LICENSE.txt" "$APP_DIR/Contents/Resources/MPV-API-LICENSE.txt"
 cp "$PROJECT_DIR/ThirdPartySources/README.md" "$APP_DIR/Contents/Resources/ThirdParty-Notices.md"
 cp "$PROJECT_DIR/ThirdPartySources/CSP-Runtime.md" "$APP_DIR/Contents/Resources/CSP-Runtime.md"
-if [[ -f "$PROJECT_DIR/Vendor/CSPRuntime/manifest.json" ]]; then
-    ditto "$PROJECT_DIR/Vendor/CSPRuntime" "$APP_DIR/Contents/Resources/CSPRuntime"
-else
-    echo "CSP runtime is missing. Run python3 scripts/prepare-csp-runtime.py before building the full application." >&2
-    exit 1
-fi
+ditto "$PROJECT_DIR/Vendor/CSPRuntime" "$APP_DIR/Contents/Resources/CSPRuntime"
 ditto "$PROJECT_DIR/Vendor/VLCKit.xcframework/macos-arm64_x86_64/VLCKit.framework" "$APP_DIR/Contents/Frameworks/VLCKit.framework"
 ditto "$PROJECT_DIR/Vendor/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
 lipo -create "${BINS[@]}" -output "$APP_DIR/Contents/MacOS/TVBoxMac"

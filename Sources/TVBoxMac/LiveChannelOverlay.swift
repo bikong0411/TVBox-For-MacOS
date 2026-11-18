@@ -66,7 +66,7 @@ struct LiveChannelOverlay: View {
     private var filterKey: String { "\(store.channelRevision)|\(browser.grouping)|\(browser.group)|\(query)" }
     private var groups: [String] { store.channelIndex.groups(for: browser.grouping) }
     private var guideKey: String { "\(guideChannel?.id ?? "")|\(day)|\(refresh)" }
-    private var displayDay: String { day.formatted(.dateTime.month().day().weekday().locale(Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en"))) }
+    private var displayDay: String { day.formatted(.dateTime.month().day().weekday().locale(L10n.locale)) }
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -247,7 +247,7 @@ struct LiveChannelOverlay: View {
         let now = Date(), playable = channel.guide?.catchup?.playbackURL(programme: programme, liveURL: channel.urls.first ?? "", now: now) != nil
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(programme.start.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")))).monospacedDigit()
+                Text(programme.start.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(L10n.locale))).monospacedDigit()
                 Spacer()
                 Text(programme.isOnAir(at: now) ? L10n.text("正在播出") : programme.start > now ? L10n.text("预告") : playable ? L10n.text("可回看") : L10n.text("已播出"))
             }.font(.system(size: 9)).foregroundStyle(programme.isOnAir(at: now) ? Theme.accent : .white.opacity(0.6))

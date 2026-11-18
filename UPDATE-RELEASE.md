@@ -7,13 +7,13 @@
 ## 第一次发布，只需配置一次
 
 1. 将本次 `Source/` 里的完整工程文件上传到仓库根目录，包含隐藏的 `.github` 目录。`Package.swift` 与 `.github` 必须同级。不要将 `.app` 或源码 ZIP 当作工程上传。`TVBoxMac-GitHub-Source.zip` 是去掉大依赖归档后的工程，可解压后使用；依赖由 Actions 下载并验证。
-2. 工作流位于 `.github/workflows/macos-build.yml`。如果仓库中已有同用途的 `main.yml`，请用新工作流内容覆盖原文件，或替换成此文件；同一份构建流程只保留一个工作流，避免重复发布。
+2. 当前唯一构建工作流为 `.github/workflows/main.yml`，请用本次文件完整覆盖仓库中的同名文件，并删除旧的 `.github/workflows/macos-build.yml`。该流程先构建独立 CSP 运行时，再编译应用，最后生成签名更新清单；两份同用途工作流同时存在会被提前检查拒绝。
 3. 更新专用签名已配置，公钥位于 `Resources/Info.plist` 的 `SUPublicEDKey`。私钥保存在本机登录钥匙串，账户名为 `bikong0411.TVBox-For-MacOS`，并备份到：
 
    `~/Library/Application Support/TVBoxMac/UpdateSigning/bikong0411.TVBox-For-MacOS/SPARKLE_PRIVATE_KEY.txt`
 
 4. 打开 [仓库 Actions Secrets](https://github.com/bikong0411/TVBox-For-MacOS/settings/secrets/actions)，选择 **New repository secret**。名称填写 `SPARKLE_PRIVATE_KEY`，值填写上述文件的完整内容。私钥不放入仓库、源码 ZIP 或应用。
-5. 提交更新后的源码及工作流，再发布指向该提交的正式标签，例如 `v0.9.6`。Actions 会编译两种架构，验证安装包，签名并生成更新清单，然后发布 Release。
+5. 提交更新后的源码及工作流，可先在 Actions → Build macOS → Run workflow 选择 main 验证。正式发布时创建指向修复提交的新标签，例如 `v0.9.7`。Actions 会编译两种架构，验证安装包，签名并生成更新清单，然后发布 Release。已有 v0.9.6 标签仍指向原提交，旧失败运行的 Re-run 也会继续使用原提交；它们不会自动包含这次修改。
 
 0.9.3 及更早版本没有应用内更新功能，需要手动安装一次 0.9.4 或更新版本；之后才能自动更新。
 

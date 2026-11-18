@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check bundled languages and actual Foundation lookup in separate processes."""
 from pathlib import Path
-import json, plistlib, re, shutil, subprocess
+import json, plistlib, re, shutil, subprocess, uuid
 
 root = Path(__file__).resolve().parent.parent
 resources = root / 'Resources'
@@ -35,5 +35,14 @@ for language in ['en','zh-Hans']:
     for locale in ['en','zh-Hans']: shutil.copytree(resources / (locale + '.lproj'), app / 'Resources' / (locale + '.lproj'), dirs_exist_ok=True)
     requested = ['en', 'en-GB', 'fr-FR'] if language == 'en' else ['zh-Hans', 'zh-Hans-CN']
     for preference in requested:
-        subprocess.run([str(app / 'MacOS/LocalizationCheck'), language, '-AppleLanguages', '(' + preference + ')'], check=True)
+        suite = 'local.tvboxmac.validation.language.' + uuid.uuid4().hex
+        subprocess.run([str(app / 'MacOS/LocalizationCheck'), language, '--ui-test', '--ui-test-suite', suite, '--cleanup', '-AppleLanguages', '(' + preference + ')'], check=True)
+    # A manual choice beats the opposite macOS app language. A second process
+    # reads the saved choice without reseeding it; follow-system restores the OS.
+    system = 'zh-Hans' if language == 'en' else 'en'
+    suite = 'local.tvboxmac.validation.language.' + uuid.uuid4().hex
+    command = [str(app / 'MacOS/LocalizationCheck'), language, '--ui-test', '--ui-test-suite', suite, '-AppleLanguages', '(' + system + ')']
+    subprocess.run(command + ['--preference', language], check=True)
+    subprocess.run(command, check=True)
+    subprocess.run([str(app / 'MacOS/LocalizationCheck'), system, '--ui-test', '--ui-test-suite', suite, '--preference', 'system', '--cleanup', '-AppleLanguages', '(' + system + ')'], check=True)
 print('PASS localization catalogs: ' + str(len(tables['en'])) + ' matching Chinese / English entries')

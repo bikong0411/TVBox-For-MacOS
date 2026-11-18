@@ -39,7 +39,7 @@ with zipfile.ZipFile(delivery / "TVBoxMac-GitHub-Source.zip", "w", zipfile.ZIP_D
         archive.write(path, relative)
 for name in ["appcast-Intel.xml", "appcast-AppleSilicon.xml", "TVBox-macOS-Intel.sha256", "TVBox-macOS-AppleSilicon.sha256"]:
     if (root / "dist" / name).exists(): shutil.copy2(root / "dist" / name, delivery / name)
-(delivery / "使用说明.txt").write_text("""TVBox for macOS 0.9.6
+(delivery / "使用说明.txt").write_text("""TVBox for macOS 0.9.7
 
 直接打开 TVBox.app，可复制到“应用程序”后使用。
 适用于 Intel（x86_64）与 Apple Silicon（M 系列芯片），最低 macOS 13。
@@ -52,7 +52,7 @@ AirPlay 选中设备后主动发起视频播放，只有系统播放器就绪、
 
 已支持：多个点播源与多个直播源独立保存和切换、JSON/XML 影视接口、分类搜索、多线路剧集、M3U/TXT 直播、视频直链、收藏和续播。
 0.9.6 修复原始订阅更新 JAR 后旧校验值导致的重复失败。发现页遇到组件校验不匹配时，仅刷新当前原订阅一次，再按新声明重新校验；成功后保存该订阅。持续不匹配、本机修正组件失败或接口已更换时停止并说明，不跳过校验，也不套用其他仓库的组件。
-0.9.5 的顶部菜单、侧边栏、播放 / 投屏操作、配置管理及网络探测支持简体中文和英文，跟随 macOS 为应用选择的语言，重新打开应用后生效。可在 macOS“系统设置 → 通用 → 语言与地区 → 应用程序”中单独为 TVBox 选择语言。英文长标签已调整布局。
+0.9.7 增加软件内语言开关：TVBox → 设置…，或配置管理 → 界面设置 → 界面语言，可选择“跟随系统 / 简体中文 / English”。手动选择优先于 macOS 系统和应用语言；设置会保存，退出并重新打开 TVBox 后统一生效。选择“跟随系统”可恢复使用 macOS 的应用语言。选择过程不打断播放，可稍后退出。顶部菜单、侧边栏、播放 / 投屏操作、配置管理及网络探测支持中英文。
 新增 Java / CSP（type 3）支持：Mac 内置独立运行时，运行不要求 Java、Android SDK、Docker 或其他设备。支持标准 Spider 初始化、首页、分类、搜索、详情和直链播放解析。旧版保存的配置请在配置管理刷新一次，读取 spider / jar 和 ext 后重新选择接口。视频继续在软件内的 mpv / VLC 播放。
 0.9.4 增加软件更新：TVBox 菜单或配置管理中可检查新版本，默认每天检查并后台下载，退出时安装。更新来自 GitHub 正式 Release，按 Intel / Apple Silicon 匹配，并验证签名。首次发布的配置步骤见 Source/UPDATE-RELEASE.md。
 0.9.3 增加 Java / CSP 标准本地视频代理回调及流式转发，支持常见 Proxy.proxy / proxyLocal、HLS 清单、分段和 Range。代理按播放会话创建，停止、切集或退出关闭，不将整个视频写入磁盘。接口返回空播放结果会给出明确说明；此能力不等于网页嗅探、转码或专有云盘 SDK 支持。
@@ -87,6 +87,7 @@ mpv 组件与 VLC 均可解码 FLV、MKV、MPEG-TS 等格式。mpv 直接接收�
 没有内置公共影视采集源；默认提供一部 Blender 官方预告片作演示。
 
 Source/ 是完整源码工程，开发和构建说明见 Source/README.md。
+GitHub 仅保留新版 .github/workflows/main.yml，并删除旧 macos-build.yml。新版流程会先构建 CSP 运行时再打包；提交后从 main 新建手动运行，正式发布可用 v0.9.7 等指向修复提交的新标签。旧运行的 Re-run 会继续使用旧提交。
 TVBoxMac-Source.zip 为源码压缩包。
 TVBox-CSP-Corresponding-Sources.zip 为 CSP 运行时相关开源组件的对应源码及构建说明。
 TVBox-macOS-Universal.zip 为 Intel / Apple Silicon 通用应用。

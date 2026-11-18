@@ -38,6 +38,7 @@ struct SourcesView: View {
                         Button(L10n.text("关闭提示")) { store.importNotice = nil }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(Theme.muted)
                     }
                 }
+                LanguageSettingsView()
                 PlayerPreferenceView()
                 AppUpdateView(updates: store.updates)
                 vodSection
