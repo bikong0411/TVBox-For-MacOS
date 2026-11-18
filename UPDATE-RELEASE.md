@@ -24,9 +24,12 @@
 - `TVBox-macOS-Intel.zip` 与 SHA-256；
 - `TVBox-macOS-AppleSilicon.zip` 与 SHA-256；
 - `appcast-Intel.xml` 与 `appcast-AppleSilicon.xml`，包含更新包及清单签名；
+- 若上一版正式包可用，会为符合条件的架构附上 `TVBox-macOS-Intel.delta` 或 `TVBox-macOS-AppleSilicon.delta`；
 - CSP 运行时对应源码包。
 
 应用使用 `https://github.com/bikong0411/TVBox-For-MacOS/releases/latest/download/appcast-Intel.xml` 或 `appcast-AppleSilicon.xml`。版本来源是正式 Release，不读取保留 14 天的 Actions 临时附件。
+
+发布时按架构下载并验证上一版正式 Release 的原始 ZIP 和签名清单，再生成到新版的差分。只有旧版构建号及应用内容匹配才会使用差分；没有差分可用或补丁应用失败时，Sparkle 回退到完整 ZIP。发布日志会记录差分和完整包的大小。
 
 普通分支 / PR 构建不发布更新，也不需要私钥。正式标签缺少签名 Secret、两种架构版本不一致、公钥不匹配或校验失败时，发布任务会失败，不生成未签名的更新。新的 Release 先作为草稿上传完整附件，完成后才公开。
 
@@ -47,5 +50,7 @@ python3 scripts/setup-update-signing.py
 ## 验证
 
 `scripts/check-app-update.py` 使用独立应用标识、独立偏好与临时签名测试包，验证真实 Sparkle 更新，不改动正式 TVBox。可选择 `manual`、`automatic`、`ready-install`、`no-update`、`tampered-feed`、`tampered-archive`；手动及立即安装模式需点击测试更新窗口的安装及重启按钮。
+
+`--mode delta` 验证安装时只下载差分，`--mode delta-fallback` 模拟差分下载失败并验证完整包回退。
 
 框架与签名机制参考 [Sparkle 官方文档](https://sparkle-project.org/documentation/)。

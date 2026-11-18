@@ -47,7 +47,7 @@ def self_test():
             healthy.replace('python3 scripts/prepare-csp-runtime.py --arch "$BUILD_ARCH"', 'echo runtime omitted'),
             healthy.replace('test -s Vendor/CSPRuntime/manifest.json', 'echo manifest unchecked'),
             healthy.replace('brew install e2fsprogs pkgconf', 'echo tools omitted'),
-            healthy.replace('runs-on: macos-15\n    timeout-minutes: 20', 'runs-on: ubuntu-24.04\n    timeout-minutes: 20'),
+            healthy.replace('    runs-on: macos-15\n', '    runs-on: ubuntu-24.04\n'),
             healthy.replace('scripts/create-update-feeds.py', 'scripts/unsigned-release.py'),
         ]
         for text in mutations:

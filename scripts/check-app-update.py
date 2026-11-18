@@ -6,8 +6,13 @@ case waits for downloaded-on-quit state; quitting it should install build 2.
 """
 from pathlib import Path
 import argparse,hashlib,http.server,json,os,plistlib,shutil,socket,subprocess,tempfile,threading,time,urllib.parse,uuid
+import xml.etree.ElementTree as ET
 root=Path(__file__).resolve().parent.parent
-parser=argparse.ArgumentParser();parser.add_argument('--mode',choices=['manual','automatic','ready-install','no-update','tampered-feed','tampered-archive'],default='manual');args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--mode',choices=['manual','automatic','ready-install','no-update','tampered-feed','tampered-archive','delta','delta-fallback'],default='manual');args=parser.parse_args()
+delta_test = args.mode in ['delta', 'delta-fallback']
+install_on_quit = delta_test or args.mode == 'automatic'
+delta_path = None
+downloads = []
 case=Path(tempfile.mkdtemp(prefix='tvbox-update-validation-'));case.chmod(0o700)
 public=case/'public';public.mkdir();caseid=uuid.uuid4().hex[:12]
 bundleid='local.tvboxmac.validation.update.'+caseid
@@ -24,7 +29,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_HEAD(self):self.serve(True)
     def serve(self,head):
         path=urllib.parse.urlsplit(self.path).path
-        if path not in ['/appcast.xml','/Validation-2.zip']:
+        if path not in ['/appcast.xml','/Validation-2.zip',delta_path]:
+            self.send_error(404);return
+        if not head and path != '/appcast.xml': downloads.append(path)
+        if args.mode == 'delta-fallback' and path == delta_path:
             self.send_error(404);return
         file=public/path[1:]
         if not file.exists():self.send_error(404);return
@@ -39,12 +47,19 @@ def make_app(folder,number):
     (contents/'Frameworks').mkdir();shutil.copytree(framework,contents/'Frameworks/Sparkle.framework',symlinks=True)
     shutil.copy2(binary,contents/'MacOS/UpdateValidation')
     info={'CFBundleIdentifier':bundleid,'CFBundleExecutable':'UpdateValidation','CFBundlePackageType':'APPL','CFBundleName':'TVBox 更新验证','CFBundleDisplayName':'TVBox 更新验证','CFBundleVersion':str(number),'CFBundleShortVersionString':'0.0.'+str(number),'LSMinimumSystemVersion':'13.0','NSPrincipalClass':'NSApplication','NSAppTransportSecurity':{'NSAllowsArbitraryLoads':True},'TVBoxUpdateRepository':'example/TVBox','SUPublicEDKey':key,'SUFeedURL':feed,'SUEnableAutomaticChecks':args.mode!='manual','SUAutomaticallyUpdate':args.mode!='manual','SUAllowsAutomaticUpdates':True,'SUVerifyUpdateBeforeExtraction':True,'SURequireSignedFeed':True,'ValidationDirectory':str(case),'ValidationMode':args.mode,'ValidationFeedURL':feed}
+    if delta_test: info['ValidationMode'] = 'automatic'
     (contents/'Info.plist').write_bytes(plistlib.dumps(info));subprocess.run(['codesign','--force','--sign','-',str(app)],check=True,capture_output=True)
     return app
 old=make_app(case/'old',2 if args.mode=='no-update' else 1);new=make_app(case/'new',2)
 subprocess.run(['ditto','-c','-k','--keepParent',str(new),str(public/'Validation-2.zip')],check=True)
 generator=root/'Vendor/SparkleDistribution/bin/generate_appcast'
-subprocess.run([str(generator),'--ed-key-file',str(private),'--download-url-prefix',f'http://127.0.0.1:{server.server_port}/','--maximum-deltas','0','--maximum-versions','1','-o',str(public/'appcast.xml'),str(public)],check=True)
+if delta_test:
+    subprocess.run(['ditto','-c','-k','--keepParent',str(old),str(public/'Validation-1.zip')],check=True)
+subprocess.run([str(generator),'--ed-key-file',str(private),'--download-url-prefix',f'http://127.0.0.1:{server.server_port}/','--maximum-deltas','1' if delta_test else '0','--maximum-versions','1','-o',str(public/'appcast.xml'),str(public)],check=True)
+if delta_test:
+    sparkle = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
+    enclosure, = ET.parse(public/'appcast.xml').findall(f'./channel/item/{sparkle}deltas/enclosure')
+    delta_path = urllib.parse.urlsplit(enclosure.attrib['url']).path
 if args.mode=='tampered-feed':
     data=(public/'appcast.xml').read_bytes();(public/'appcast.xml').write_bytes(data.replace(b'0.0.2',b'0.0.3'))
 if args.mode=='tampered-archive':
@@ -58,7 +73,7 @@ try:
     deadline=time.monotonic()+300
     while time.monotonic()<deadline:
         info=plistlib.loads((old/'Contents/Info.plist').read_bytes())
-        if args.mode=='automatic' and (case/'ready-1.json').exists() and not quit_requested:
+        if install_on_quit and (case/'ready-1.json').exists() and not quit_requested:
             assert info['CFBundleVersion']=='1','Update installed before ordinary quit'
             assert not (case/'early-termination-1.json').exists(),'Background update tried to interrupt the running application'
             (case/'allow-quit').touch();quit_requested=True
@@ -68,7 +83,10 @@ try:
         if args.mode.startswith('tampered') and (case/'failure-1.json').exists():
             assert info['CFBundleVersion']=='1';print('PASS '+args.mode+' rejected; installed app unchanged',flush=True);break
         if info['CFBundleVersion']=='2':
-            if args.mode=='automatic':assert quit_requested and (case/'terminate-1.json').exists()
+            if install_on_quit:assert quit_requested and (case/'terminate-1.json').exists()
+            if delta_test:
+                assert delta_path in downloads, 'Sparkle did not request the delta'
+                assert ('/Validation-2.zip' in downloads) == (args.mode == 'delta-fallback')
             if args.mode in ['manual','ready-install'] and not (case/'launch-2.json').exists():time.sleep(.2);continue
             if args.mode in ['manual','ready-install']:assert json.loads((case/'launch-2.json').read_text())['sentinel']=='preserved'
             print('PASS real '+args.mode+' update: build 1 replaced by build 2'+('; relaunch and preferences preserved' if args.mode in ['manual','ready-install'] else '; install on quit'),flush=True);break
