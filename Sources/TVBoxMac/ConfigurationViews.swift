@@ -42,7 +42,7 @@ struct DirectView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack { Text(L10n.text("打开视频地址")).font(.system(size: 24, weight: .semibold)); Spacer(); Button { dismiss() } label: { Image(systemName: "xmark") }.buttonStyle(.plain).keyboardShortcut(.cancelAction) }
-            Text(L10n.text("支持 HLS / MP4 / MKV / FLV 等视频直链，使用内置播放器。")).font(.system(size: 12)).foregroundStyle(Theme.muted)
+            Text(L10n.text("支持视频直链，也可尝试从播放网页查找公开的视频地址。")).font(.system(size: 12)).foregroundStyle(Theme.muted)
             TextField("https://example.com/video.m3u8", text: $address).textFieldStyle(.plain).font(.system(size: 13, design: .monospaced)).padding(14).background(Theme.panel, in: RoundedRectangle(cornerRadius: 8)).onSubmit { submit() }
             HStack { Button(L10n.text("打开本地视频…")) { dismiss(); store.openVideoFile() }; Spacer(); Button(L10n.text("播放")) { submit() }.buttonStyle(.borderedProminent).disabled(address.isEmpty).keyboardShortcut(.defaultAction) }
         }.padding(32).frame(width: 540).background(Theme.background).tint(Theme.accent)

@@ -280,12 +280,17 @@ struct PlaybackSurface: View {
                 if let error = controller.error {
                     VStack(spacing: 15) {
                         Image(systemName: "exclamationmark.circle").font(.system(size: 35)).foregroundStyle(Theme.accent)
-                        Text(controller.failure?.title ?? L10n.text("暂时无法播放")).font(.system(size: 18, weight: .semibold))
-                        Text(error).font(.system(size: 12)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).frame(maxWidth: 420)
+                        Text(L10n.string(controller.failure?.title ?? "暂时无法播放")).font(.system(size: 18, weight: .semibold))
+                        let fromWebPage = current.webPageURL != nil && current.resolvedEpisode != nil
+                        Text(fromWebPage ? L10n.text("已找到网页中的视频地址，但视频仍无法播放。") + "\n" + error : error)
+                            .font(.system(size: 12)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).frame(maxWidth: 420)
                         HStack {
                             Button(current.isLive && current.line.episodes.count > 1 ? L10n.text("重试全部线路") : L10n.text("重试")) { store.retryPlayback() }
                             if current.isLive && current.line.episodes.count > 1 { Button(L10n.text("下一条线路")) { store.nextLiveRoute() } }
                             Button(L10n.text("复制地址")) { store.copyURL() }
+                            if let url = current.webPageURL {
+                                Link(L10n.text("在浏览器打开网页"), destination: url)
+                            }
                         }
                         if current.isLive {
                             Button(L10n.text("刷新直播列表")) { store.stop(); store.section = .live; store.refreshLive() }.font(.system(size: 12))

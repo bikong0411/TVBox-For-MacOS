@@ -30,6 +30,8 @@ struct Playback {
     var isLive: Bool = false
     var catchupProgramme: Programme?
     var resolvedEpisode: Episode? = nil
+    var webMediaHeaders: [String: String]? = nil
+    var webPageURL: URL? = nil
     var cspLease: CSPPlaybackLease? = nil
     var episode: Episode { line.episodes[index] }
 }
@@ -339,9 +341,9 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         let surface = PersistentVideoSurface(player: player); storedVideoSurface = surface; return surface
     }
     func stopPresentation() { storedVideoSurface?.stopPictureInPicture() }
-    func prepareSpiderPlayback() {
+    func preparePlaybackResolution(_ message: String) {
         stopPresentation(); stop(); error = nil; failure = nil
-        connectionStartedAt = Date(); connectingMessage = "正在解析播放地址…"
+        connectionStartedAt = Date(); connectingMessage = L10n.string(message)
     }
     @Published var error: String?
     @Published var playbackAuthorization: CSPPlaybackAuthorization?
@@ -721,10 +723,10 @@ enum LiveLayout: String, CaseIterable, Identifiable {
             return
         }
         let count = livePlan?.attemptedCount ?? 0
-        let retryMessage = tlsRetryAttempted ? "已自动重试 1 次，仍未能播放。\n" : ""
+        let retryMessage = tlsRetryAttempted ? L10n.string("已自动重试 1 次，仍未能播放。") + "\n" : ""
         clearAttempt()
         self.failure = failure
-        self.error = (count > 1 ? "已尝试 \(count) 条线路，均未成功。\n" : "") + retryMessage + failure.message
+        self.error = (count > 1 ? "已尝试 \(count) 条线路，均未成功。\n" : "") + retryMessage + L10n.string(failure.message)
     }
     private func clearAsset() {
         status = nil
@@ -853,6 +855,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     let player = PlayerController()
     let fullscreen: PlaybackFullscreenPresenter
     let service: TVService
+    private let webVideo = WebVideoResolver()
     let cspRuntime: CSPBundledRuntime
     let liveBrowser: LiveBrowserState
     let networkProbe = NetworkProbeModel()
@@ -1219,16 +1222,46 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         player.preferMPV = playbackPreference == .preferIINA
         if current.isLive && current.catchupProgramme == nil {
             player.playLive(current.line.episodes, index: current.index, headers: current.headers) { [weak self] route in self?.playback?.index = route }
-        } else { player.play(current.resolvedEpisode ?? current.episode, headers: current.headers, position: position) }
+        } else { player.play(current.resolvedEpisode ?? current.episode, headers: current.webMediaHeaders ?? current.headers, position: position) }
     }
     private func startPlayback(position: Double, forceResolve: Bool = false) {
         resolutionTask?.cancel(); resolutionID = UUID(); let token = resolutionID
         guard let current = playback else { return }
+        if !current.isLive, current.site?.requiresCSP != true, forceResolve || current.resolvedEpisode == nil,
+           let url = URL(string: current.episode.url), WebVideoResolver.shouldInspect(url),
+           current.headers.keys.allSatisfy({ ["user-agent", "referer", "referrer"].contains($0.lowercased()) }) {
+            playback?.resolvedEpisode = nil
+            playback?.webMediaHeaders = nil
+            playback?.webPageURL = nil
+            player.preparePlaybackResolution("正在检查网页中的视频地址…")
+            resolutionTask = Task {
+                do {
+                    let result = try await webVideo.resolve(url, headers: current.headers)
+                    guard !Task.isCancelled, resolutionID == token, playback != nil else { return }
+                    if case let .media(media, headers) = result {
+                        playback?.resolvedEpisode = Episode(name: current.episode.name, url: media.absoluteString)
+                        playback?.webMediaHeaders = headers
+                        playback?.webPageURL = url
+                    }
+                    startInternalPlayback(position: position)
+                } catch {
+                    guard !Task.isCancelled, resolutionID == token, playback != nil else { return }
+                    if let problem = error as? WebVideoResolver.Failure {
+                        playback?.webPageURL = url
+                        player.error = L10n.string(problem.localizedDescription)
+                    } else {
+                        // Let the player report the normal network or TLS error.
+                        startInternalPlayback(position: position)
+                    }
+                }
+            }
+            return
+        }
         guard let site = current.site, site.requiresCSP, !current.isLive, forceResolve || current.resolvedEpisode == nil else {
             startInternalPlayback(position: position); return
         }
         playback?.resolvedEpisode = nil
-        player.prepareSpiderPlayback()
+        player.preparePlaybackResolution("正在解析播放地址…")
         playback?.cspLease?.stop(); playback?.cspLease = nil
         resolutionTask = Task {
             do {

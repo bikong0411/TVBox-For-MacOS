@@ -48,6 +48,10 @@ public struct PlaybackFailure: Equatable {
             kind = .network
             title = "无法连接视频服务器"
             message = "连接超时、域名解析失败或网络已断开。请检查网络后重试。"
+        } else if errors.contains(where: { $0.domain == "mpv" && $0.code == -17 }) {
+            kind = .playback
+            title = "暂时无法播放"
+            message = "播放器无法识别返回的内容。若这是播放网页，请在浏览器打开，或使用视频直链。"
         } else {
             kind = .playback
             title = "暂时无法播放"
