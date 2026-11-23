@@ -58,6 +58,19 @@ public enum CSPPlaybackAuthorization: LocalizedError, Sendable, Equatable {
     }
 }
 
+public enum CSPPlaybackUnavailable: LocalizedError, Sendable {
+    case missing, expired, unsupportedProtocol, webParsing
+
+    public var errorDescription: String? {
+        switch self {
+        case .missing: return "片源报告找不到该视频，请切换线路或刷新源配置。"
+        case .expired: return "片源报告视频已下架或链接已失效，请切换线路或刷新源配置。"
+        case .unsupportedProtocol: return "片源返回的播放地址使用了不支持的协议，请切换线路。"
+        case .webParsing: return "此线路还需要网页解析，请选择可直接播放的线路。"
+        }
+    }
+}
+
 public struct CSPPlayback: Sendable {
     public let url: URL
     public let headers: [String: String]
@@ -84,15 +97,15 @@ public struct CSPPlayback: Sendable {
         if !supportedScheme || host?.isEmpty != false || parse != 0 || jx != 0 {
             if let authorization = CSPPlaybackAuthorization(result: result) { throw authorization }
             if (!supportedScheme || host?.isEmpty != false), let reason = Self.reportedFailure(in: result, rawURL: rawURL) {
-                throw TVError.message(reason)
+                throw reason
             }
         }
-        guard parse == 0, jx == 0 else { throw TVError.message("此线路还需要网页解析，请选择可直接播放的线路。") }
+        guard parse == 0, jx == 0 else { throw CSPPlaybackUnavailable.webParsing }
         if result["url"] == nil || result["url"] is NSNull || rawURL?.isEmpty == true {
             throw TVError.message("片源未返回本线路的播放地址，请重试或切换线路。")
         }
         if scheme != nil && !supportedScheme {
-            throw TVError.message("片源返回的播放地址使用了不支持的协议，请切换线路。")
+            throw CSPPlaybackUnavailable.unsupportedProtocol
         }
         guard let url, supportedScheme, let host, !host.isEmpty else {
             throw TVError.message("片源返回的播放地址格式不正确，请重试或切换线路。")
@@ -119,7 +132,7 @@ public struct CSPPlayback: Sendable {
 
     /// Turn known source responses into fixed UI text. The source may include
     /// signed URLs or credentials in its message, so never display it verbatim.
-    private static func reportedFailure(in result: [String: Any], rawURL: String?) -> String? {
+    private static func reportedFailure(in result: [String: Any], rawURL: String?) -> Error? {
         let error = result["error"] as? [String: Any] ?? [:]
         let fields = ["msg", "message", "error", "code", "status", "statusCode"]
         var values = fields.flatMap { [result[$0], error[$0]] }
@@ -132,19 +145,19 @@ public struct CSPPlayback: Sendable {
                   text.utf8.count <= 256 else { continue }
             switch text.trimmingCharacters(in: trim).lowercased() {
             case "401", "unauthorized", "login_required", "login required", "请登录", "请先登录", "请先登录后播放", "登录后观看", "需要登录", "登录已过期", "登录失效", "请扫码登录", "需要扫码授权", "qr_required":
-                return "片源要求登录或重新授权，请在片源端处理，或切换线路。"
+                return TVError.message("片源要求登录或重新授权，请在片源端处理，或切换线路。")
             case "403", "forbidden", "permission_denied", "access denied", "vip_required", "无权限", "权限不足", "拒绝访问", "需要会员", "会员专享", "仅限会员观看":
-                return "片源拒绝访问或要求额外权限，请检查片源权限，或切换线路。"
+                return TVError.message("片源拒绝访问或要求额外权限，请检查片源权限，或切换线路。")
             case "404", "not_found", "not found", "资源不存在", "视频不存在", "影片不存在":
-                return "片源报告找不到该视频，请切换线路或刷新源配置。"
+                return CSPPlaybackUnavailable.missing
             case "410", "gone", "expired", "url_expired", "link expired", "链接已失效", "链接已过期", "播放地址已失效", "播放地址已过期", "视频已下架", "已下架":
-                return "片源报告视频已下架或链接已失效，请切换线路或刷新源配置。"
+                return CSPPlaybackUnavailable.expired
             case "408", "504", "timeout", "request timeout", "gateway timeout", "请求超时", "连接超时", "网络超时":
-                return "片源报告请求超时，请稍后重试。"
+                return TVError.message("片源报告请求超时，请稍后重试。")
             case "429", "too many requests", "rate_limited", "请求过于频繁", "访问过于频繁":
-                return "片源限制了请求频率，请稍后重试。"
+                return TVError.message("片源限制了请求频率，请稍后重试。")
             case "500", "502", "503", "server_error", "service unavailable", "服务器错误", "服务暂不可用":
-                return "片源报告服务暂不可用，请稍后重试或切换线路。"
+                return TVError.message("片源报告服务暂不可用，请稍后重试或切换线路。")
             default:
                 continue
             }

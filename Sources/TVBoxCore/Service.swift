@@ -14,10 +14,10 @@ public struct TVService {
         guard data.count <= 8 * 1024 * 1024 else { throw TVError.message("爬虫接口返回的数据过大。") }
         return data
     }
-    public func data(at url: URL, headers: [String: String] = [:], reload: Bool = false) async throws -> Data {
+    public func data(at url: URL, headers: [String: String] = [:], reload: Bool = false, timeout: TimeInterval = 25) async throws -> Data {
         if url.isFileURL { return try Data(contentsOf: url) }
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { throw TVError.message("该地址协议暂不支持。请使用 HTTP 或 HTTPS。") }
-        var request = URLRequest(url: url, timeoutInterval: 25)
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         if reload {
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
@@ -99,7 +99,7 @@ public struct TVService {
         components.queryItems = items
         guard let url = components.url else { throw TVError.message("无法生成请求地址。") }; return url
     }
-    public func catalog(site: Site, category: String? = nil, search: String = "", page: Int = 1) async throws -> Catalog {
+    public func catalog(site: Site, category: String? = nil, search: String = "", page: Int = 1, timeout: TimeInterval = 25) async throws -> Catalog {
         if site.type == 3 {
             let command: CSPCommand = !search.isEmpty ? .search : !(category ?? "").isEmpty ? .category : .home
             let bytes = try await spider(site, command, ["category": category ?? "", "query": search, "page": String(max(1, page))])
@@ -122,7 +122,7 @@ public struct TVService {
         if let category, !category.isEmpty { parameters["t"] = category }
         if !search.isEmpty { parameters["wd"] = search }
         let url = try requestURL(site: site, parameters: parameters)
-        return try Parser.catalog(await data(at: url, headers: site.headers), base: url)
+        return try Parser.catalog(await data(at: url, headers: site.headers, timeout: timeout), base: url)
     }
     public func categories(site: Site) async throws -> [Category] {
         if site.type == 3 {
@@ -131,15 +131,41 @@ public struct TVService {
         let url = try requestURL(site: site, parameters: ["ac": "list"])
         return try Parser.catalog(await data(at: url, headers: site.headers), base: url).categories
     }
-    public func detail(video: Video, site: Site) async throws -> Video {
+    public func detail(video: Video, site: Site, timeout: TimeInterval = 25) async throws -> Video {
         if site.type == 3 {
             let bytes = try await spider(site, .detail, ["id": video.id])
             guard let detail = try Parser.catalog(bytes, base: site.csp?.configurationURL, resolveEpisodeURLs: false).videos.first else { throw TVError.message("爬虫未返回这部影片的详情。") }
             return detail
         }
         let url = try requestURL(site: site, parameters: ["ac": site.type == 0 ? "videolist" : "detail", "ids": video.id])
-        guard let detail = try Parser.catalog(await data(at: url, headers: site.headers), base: url).videos.first else { throw TVError.message("接口未返回这部影片的详情。") }
+        guard let detail = try Parser.catalog(await data(at: url, headers: site.headers, timeout: timeout), base: url).videos.first else { throw TVError.message("接口未返回这部影片的详情。") }
         return detail
+    }
+    public func checkedCatalogVideos(_ videos: [Video], site: Site?, availability: VODAvailability, probeLimit: Int = 8) async -> [Video] {
+        var candidates = videos
+        if let site, site.supported, probeLimit > 0 {
+            let ids = videos.lazy.filter { $0.lines.isEmpty && !$0.id.contains(",") }.prefix(probeLimit).map(\.id)
+            if !ids.isEmpty,
+               let url = try? requestURL(site: site, parameters: ["ac": site.type == 0 ? "videolist" : "detail", "ids": ids.joined(separator: ",")]),
+               let bytes = try? await data(at: url, headers: site.headers, timeout: 2.5),
+               let detail = try? Parser.catalog(bytes, base: url) {
+                let requested = Set(ids)
+                let lines = Dictionary(detail.videos.filter { requested.contains($0.id) && !$0.lines.isEmpty }
+                    .map { ($0.id, $0.lines) }, uniquingKeysWith: { first, _ in first })
+                for index in candidates.indices where candidates[index].lines.isEmpty {
+                    if let resolved = lines[candidates[index].id] { candidates[index].lines = resolved }
+                }
+            }
+        }
+        let checked = await availability.filter(candidates, site: site, probeLimit: probeLimit)
+        let summaries = Set(videos.filter { $0.lines.isEmpty }.map(\.id))
+        // Keep catalog summaries as summaries so opening one still loads full details.
+        return checked.map { video in
+            guard summaries.contains(video.id) else { return video }
+            var summary = video
+            summary.lines = []
+            return summary
+        }
     }
     public func resolvePlayback(site: Site, line: PlayLine, episode: Episode) async throws -> CSPPlayback {
         if site.type == 3 {

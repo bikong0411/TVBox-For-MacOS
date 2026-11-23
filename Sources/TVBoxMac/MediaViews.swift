@@ -7,7 +7,7 @@ struct DetailView: View {
     @Environment(\.dismiss) var dismiss
     let selection: DetailSelection
     @State private var video: Video
-    @State private var loading = false
+    @State private var loading = true
     @State private var error: String?
     @State private var lineID = ""
     init(selection: DetailSelection) { self.selection = selection; _video = State(initialValue: selection.video) }
@@ -37,7 +37,7 @@ struct DetailView: View {
                     if !video.summary.isEmpty {
                         VStack(alignment: .leading, spacing: 10) { Text(L10n.text("剧情简介")).font(.system(size: 14, weight: .semibold)); Text(video.summary).font(.system(size: 12)).lineSpacing(6).foregroundStyle(Theme.muted).textSelection(.enabled) }
                     }
-                    if !video.lines.isEmpty {
+                    if !video.lines.isEmpty && !loading {
                         HStack { Text(L10n.text("选集播放")).font(.system(size: 15, weight: .semibold)); Spacer(); Text(L10n.text("\(line?.episodes.count ?? 0) 集")).font(.system(size: 11)).foregroundStyle(Theme.muted) }
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
@@ -60,11 +60,14 @@ struct DetailView: View {
             .task { await load() }
     }
     private func load() async {
-        guard let site = selection.site, video.lines.isEmpty else { return }
         loading = true; error = nil
-        do { let result = try await store.service.detail(video: video, site: site); if !Task.isCancelled { video = result } }
-        catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-        loading = false
+        defer { loading = false }
+        do {
+            if let result = try await store.checkedDetail(selection.video, site: selection.site) { video = result }
+            else { video.lines = [] }
+        } catch {
+            if !Task.isCancelled { self.error = L10n.string(error.localizedDescription) }
+        }
     }
     private func start() {
         if let resume = selection.resume, let episode = resume.episode {
@@ -215,6 +218,7 @@ struct PlaybackActions: View {
                 Button { store.switchChannel(-1) } label: { Text(L10n.text("上一台")).playbackActionLabel() }.disabled(!store.canSwitchChannel(-1))
                 Button { store.switchChannel(1) } label: { Text(L10n.text("下一台")).playbackActionLabel() }.disabled(!store.canSwitchChannel(1))
             }
+            PlaybackSourceSwitchButton(current: current)
             Text(controller.playbackEngine).font(.system(size: 10)).foregroundStyle(Theme.muted)
                 .frame(height: 32).padding(.horizontal, 4)
             PlaybackRateMenu(controller: controller, casting: controller.dlna)
@@ -288,6 +292,7 @@ struct PlaybackSurface: View {
                             Button(current.isLive && current.line.episodes.count > 1 ? L10n.text("重试全部线路") : L10n.text("重试")) { store.retryPlayback() }
                             if current.isLive && current.line.episodes.count > 1 { Button(L10n.text("下一条线路")) { store.nextLiveRoute() } }
                             Button(L10n.text("复制地址")) { store.copyURL() }
+                            if isFullscreen { PlaybackSourceSwitchButton(current: current) }
                             if let url = current.webPageURL {
                                 Link(L10n.text("在浏览器打开网页"), destination: url)
                             }

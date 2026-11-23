@@ -22,6 +22,7 @@ struct ContentView: View {
                 else {
                     switch store.section {
                     case .discover: DiscoverView()
+                    case .search: AggregateSearchView(model: store.aggregateSearch)
                     case .live: LiveView(browser: store.liveBrowser, probe: store.networkProbe)
                     case .favorites: LibraryView(history: false)
                     case .history: LibraryView(history: true)
@@ -129,6 +130,7 @@ struct DiscoverView: View {
                             if !store.query.isEmpty { Button { store.query = ""; store.search() } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Theme.muted) }
                         }.font(.system(size: 12)).padding(11).frame(width: 225).background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
                         .disabled(store.site?.searchable == false)
+                        Button(L10n.text("聚合搜索")) { store.searchAll(store.query) }.fixedSize()
                     }
                     if !store.categories.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -154,7 +156,7 @@ struct DiscoverView: View {
                             }
                         }
                     }
-                    if store.loading && store.videos.isEmpty {
+                    if store.loading && store.displayedVideos.isEmpty {
                         VStack(spacing: 12) {
                             ProgressView(L10n.text("正在加载影视源…"))
                             if store.site?.requiresCSP == true {
@@ -169,11 +171,11 @@ struct DiscoverView: View {
                         }.frame(maxWidth: .infinity).padding(70)
                     } else if !store.isDemo && store.supportedSites.isEmpty {
                         EmptyViewCard(icon: "puzzlepiece.extension", title: L10n.text("暂时没有可调用的接口"), message: L10n.text("Java / CSP 接口需要完整运行时及有效的 spider 配置。旧配置请先在配置管理中刷新一次，也可以切换其他接口。"), action: L10n.text("查看配置")) { store.section = .sources }
-                    } else if store.videos.isEmpty && store.catalogError == nil {
+                    } else if store.displayedVideos.isEmpty && store.catalogError == nil && store.page >= store.pageCount {
                         EmptyViewCard(icon: "magnifyingglass", title: L10n.text("没有找到影片"), message: L10n.text("试试其他关键词、分类或影视源。"))
                     } else {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 25) {
-                            ForEach(Array(store.videos.enumerated()), id: \.element.id) { index, video in
+                            ForEach(Array(store.displayedVideos.enumerated()), id: \.element.id) { index, video in
                                 VideoCard(video: video, index: index) { store.show(video, site: store.site) }
                             }
                         }

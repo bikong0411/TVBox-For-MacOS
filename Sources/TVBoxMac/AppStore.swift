@@ -6,11 +6,11 @@ import TVBoxCore
 import UniformTypeIdentifiers
 
 enum Section: String, CaseIterable, Identifiable {
-    case discover = "发现", live = "电视直播", favorites = "我的收藏", history = "播放记录", sources = "配置管理", network = "网络探测"
+    case discover = "发现", search = "聚合搜索", live = "电视直播", favorites = "我的收藏", history = "播放记录", sources = "配置管理", network = "网络探测"
     var id: String { rawValue }
     var title: String { L10n.string(rawValue) }
     var icon: String {
-        switch self { case .discover: return "square.grid.2x2"; case .live: return "tv"; case .favorites: return "heart"; case .history: return "clock.arrow.circlepath"; case .sources: return "slider.horizontal.3"; case .network: return "network" }
+        switch self { case .discover: return "square.grid.2x2"; case .search: return "magnifyingglass"; case .live: return "tv"; case .favorites: return "heart"; case .history: return "clock.arrow.circlepath"; case .sources: return "slider.horizontal.3"; case .network: return "network" }
     }
 }
 
@@ -22,6 +22,7 @@ struct DetailSelection: Identifiable {
 }
 
 struct Playback {
+    let sessionID = UUID()
     var video: Video
     var site: Site?
     var line: PlayLine
@@ -855,6 +856,10 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     let player = PlayerController()
     let fullscreen: PlaybackFullscreenPresenter
     let service: TVService
+    let availability = VODAvailability()
+    let aggregateSearch = AggregateSearchModel()
+    var playbackSearchCache = VODPlaybackSearchCache()
+    @Published private var hiddenDetails: [String: Date] = [:]
     private let webVideo = WebVideoResolver()
     let cspRuntime: CSPBundledRuntime
     let liveBrowser: LiveBrowserState
@@ -884,6 +889,68 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     var hasSources: Bool { !vodSources.isEmpty || !liveSources.isEmpty }
     var site: Site? { sourceLibrary.activeVOD?.runtimeSite(siteID) }
     var supportedSites: [Site] { configuration?.sites.filter { service.supports($0) } ?? [] }
+    var searchSources: [VODSearchSource] {
+        vodSources.flatMap { source in
+            source.configuration.sites.compactMap { site in
+                guard site.searchable, service.supports(site), let runtime = source.runtimeSite(site.key) else { return nil }
+                return VODSearchSource(subscription: source.name, site: runtime)
+            }
+        }
+    }
+    var displayedVideos: [Video] { videos.filter { isVisible($0, site: site) } }
+    func isVisible(_ video: Video, site: Site?) -> Bool {
+        guard let site else { return true }
+        return (hiddenDetails[LibraryEntry(video: video, site: site).id] ?? .distantPast) <= Date()
+    }
+    func checkedDetail(_ video: Video, site: Site?) async throws -> Video? {
+        let detail: Video
+        if let site, video.lines.isEmpty { detail = try await service.detail(video: video, site: site) }
+        else { detail = video }
+        let checked = await availability.filter([detail], site: site, probeLimit: 8).first
+        try Task.checkCancellation()
+        if let site { setUnavailable(checked?.lines.isEmpty != false, video: video, site: site) }
+        return checked.flatMap { $0.lines.isEmpty ? nil : $0 }
+    }
+    private func setUnavailable(_ unavailable: Bool, video: Video, site: Site) {
+        let key = LibraryEntry(video: video, site: site).id
+        if !unavailable {
+            if hiddenDetails[key] != nil { hiddenDetails.removeValue(forKey: key) }
+            return
+        }
+        hiddenDetails = hiddenDetails.filter { $0.value > Date() }
+        if hiddenDetails.count >= 512, let oldest = hiddenDetails.min(by: { $0.value < $1.value }) {
+            hiddenDetails.removeValue(forKey: oldest.key)
+        }
+        hiddenDetails[key] = Date().addingTimeInterval(120)
+    }
+    func searchAll(_ text: String) {
+        section = .search
+        aggregateSearch.query = text
+        aggregateSearch.submit(service: service, sources: searchSources, availability: availability)
+    }
+    func switchPlaybackSource(to hit: VODSearchHit, current: Playback) async throws {
+        guard playback?.sessionID == current.sessionID else { throw CancellationError() }
+        guard let source = searchSources.first(where: { $0.id == hit.source.id }),
+              VODMatch.sameTitle(current.video, hit.video) else {
+            throw TVError.message("片源已更改，请重新搜索。")
+        }
+        let detail = try await checkedDetail(hit.video, site: source.site)
+        try Task.checkCancellation()
+        guard playback?.sessionID == current.sessionID else { throw CancellationError() }
+        guard let detail, VODMatch.sameTitle(current.video, detail),
+              let (line, index) = VODMatch.matchingEpisode(current.episode, in: detail, singleEpisode: current.line.episodes.count == 1) else {
+            throw VODSwitchFailure.noEpisode
+        }
+        var candidate = detail
+        candidate.lines = [PlayLine(name: line.name, episodes: [line.episodes[index]])]
+        let verified = await availability.filter([candidate], site: source.site, probeLimit: 1)
+        try Task.checkCancellation()
+        guard playback?.sessionID == current.sessionID else { throw CancellationError() }
+        guard !verified.isEmpty else { throw VODSwitchFailure.noEpisode }
+        let saved = history.first { $0.id == LibraryEntry(video: current.video, site: current.site).id && $0.episode?.id == current.episode.id }
+        let position = player.ready && player.position.isFinite ? player.position : saved?.position ?? 0
+        play(video: detail, site: source.site, line: line, index: index, position: max(0, position))
+    }
     init(fullscreen: PlaybackFullscreenPresenter? = nil) {
         self.fullscreen = fullscreen ?? PlaybackFullscreenPresenter()
         let assets = (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("CSPRuntime", isDirectory: true)
@@ -966,6 +1033,8 @@ enum LiveLayout: String, CaseIterable, Identifiable {
             do {
                 let loaded = try await service.catalogRefreshingCSP(source: source, siteID: selectedSiteID, category: selectedCategory, search: search, page: targetPage)
                 let result = loaded.catalog
+                let resultSite = (loaded.refreshed ?? source).runtimeSite(selectedSiteID)
+                let checkedVideos = await service.checkedCatalogVideos(result.videos, site: resultSite, availability: availability)
                 guard !Task.isCancelled, requestID == token else { return }
                 if let refreshed = loaded.refreshed {
                     guard sourceLibrary.vodSources.first(where: { $0.id == source.id }) == source else { loading = false; return }
@@ -973,7 +1042,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                     persistLibrary()
                 }
                 categories = loaded.categories ?? result.categories
-                if append { var ids = Set(videos.map(\.id)); videos += result.videos.filter { ids.insert($0.id).inserted } } else { videos = result.videos }
+                if append { var ids = Set(videos.map(\.id)); videos += checkedVideos.filter { ids.insert($0.id).inserted } } else { videos = checkedVideos }
                 page = targetPage; pageCount = result.pageCount; loading = false
             } catch {
                 guard !Task.isCancelled, requestID == token else { return }
@@ -1275,6 +1344,12 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                 guard !Task.isCancelled, resolutionID == token, playback != nil else { return }
                 player.error = L10n.string(error.localizedDescription)
                 player.playbackAuthorization = error as? CSPPlaybackAuthorization
+                if error is CSPPlaybackUnavailable {
+                    await availability.markCrawlerUnavailable(site: site, line: current.line, episode: current.episode)
+                    let options = await availability.filter([current.video], site: site, probeLimit: 0)
+                    guard !Task.isCancelled, resolutionID == token else { return }
+                    if options.isEmpty { setUnavailable(true, video: current.video, site: site) }
+                }
             }
         }
     }

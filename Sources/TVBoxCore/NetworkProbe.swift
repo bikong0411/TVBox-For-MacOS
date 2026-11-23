@@ -96,6 +96,12 @@ public struct ProbeResult: Equatable, Sendable {
 public struct NetworkProber: Sendable {
     private let configuration: @Sendable () -> URLSessionConfiguration
     public init(configuration: @escaping @Sendable () -> URLSessionConfiguration = { .ephemeral }) { self.configuration = configuration }
+    /// Use the same GET a player would make, but finish at response headers.
+    /// A successful status alone is not proof that a video can be decoded.
+    func mediaStatus(url: URL, headers: [String: String]) async -> Int? {
+        let target = ProbeTarget(id: "", name: "", kind: .vod, url: url.absoluteString, headers: headers)
+        return await request(url, target: target, method: "GET", timeout: 2.5).status
+    }
     public func probe(_ target: ProbeTarget, timeout: TimeInterval) async -> ProbeResult {
         let start = DispatchTime.now().uptimeNanoseconds
         let limit = min(30, max(0.1, timeout))
