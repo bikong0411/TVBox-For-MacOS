@@ -188,7 +188,9 @@ private struct PlayerContent: View {
                         })) { ForEach(current.video.lines) { Text($0.name).tag($0.id) } }.frame(maxWidth: 260)
                     }
                     Text(current.isLive && current.catchupProgramme == nil ? L10n.text("双击切换全屏 · Esc 返回") : L10n.text("← 后退 3 秒 · → 快进 3 秒 · 连按 / 长按连续调整 · 双击切换全屏")).font(.system(size: 10)).foregroundStyle(Theme.muted)
-                }.padding(30)
+                }
+                .padding(30)
+                .background { PlaybackOverlayScroller() }
             }
         }
     }
@@ -197,6 +199,28 @@ private struct PlayerContent: View {
         VStack(alignment: .leading, spacing: 7) {
             Text(current.video.title).font(.system(size: 23, weight: .semibold)).lineLimit(2)
             Text("\(current.line.name) · \(current.episode.name)").font(.system(size: 12)).foregroundStyle(Theme.muted)
+        }
+    }
+}
+
+private struct PlaybackOverlayScroller: NSViewRepresentable {
+    func makeNSView(context: Context) -> ScrollAnchor { ScrollAnchor() }
+
+    func updateNSView(_ view: ScrollAnchor, context: Context) {
+        view.useOverlayScroller()
+    }
+
+    final class ScrollAnchor: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            useOverlayScroller()
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        func useOverlayScroller() {
+            guard let scrollView = enclosingScrollView, scrollView.scrollerStyle != .overlay else { return }
+            scrollView.scrollerStyle = .overlay
         }
     }
 }
