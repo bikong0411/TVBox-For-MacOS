@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// One helper process and bounded HLS cache per playing live channel.
@@ -69,3 +70,4 @@ import Foundation
     }
     deinit { if !stopped { Self.cleanup(server: server, process: process, directory: directory, handle: logHandle, started: started) } }
 }
+#endif

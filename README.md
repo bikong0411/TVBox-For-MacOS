@@ -2,6 +2,8 @@
 
 原生 SwiftUI 影视客户端，支持 **macOS 13+、Intel 和 Apple Silicon**。内置 VLC，可优先使用本机 IINA 的 mpv 组件，视频始终在 TVBox 内播放，无需额外安装播放器。
 
+Apple TV 版的源码与安装说明见 [TVBox for tvOS](TVBoxTV/README.md)。
+
 ## 安装与使用
 
 从 [Releases](https://github.com/bikong0411/TVBox-For-MacOS/releases) 下载对应芯片的安装包，解压后将 `TVBox.app` 放入“应用程序”。
@@ -66,7 +68,7 @@ bash scripts/build-app.sh --universal
 
 ## GitHub 自动编译与发布
 
-将工程放在仓库根目录，确保 `Package.swift` 与 `.github` 同级。仅保留 [main.yml](.github/workflows/main.yml)，删除旧的 `macos-build.yml`。
+将工程放在仓库根目录，确保 `Package.swift` 与 `.github` 同级。Mac 安装包由 [main.yml](.github/workflows/main.yml) 构建，tvOS 使用 [tvos.yml](.github/workflows/tvos.yml) 单独检查。
 
 - 推送 main / master、提交 PR，或在 **Actions → Build macOS → Run workflow** 手动触发编译。
 - 完成后在该次运行的 **Artifacts** 下载 Intel / Apple Silicon 安装包，临时附件保留 14 天。

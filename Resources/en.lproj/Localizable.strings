@@ -191,6 +191,7 @@
 "搜索名称或地址" = "Search name or URL";
 "搜索大约需要几秒钟。" = "Searching usually takes a few seconds.";
 "搜索当前影视源" = "Search current source";
+"该源暂不支持搜索" = "This source doesn't support search";
 "搜索结果" = "Search results";
 "搜索频道" = "Search channels";
 "播放" = "Play";

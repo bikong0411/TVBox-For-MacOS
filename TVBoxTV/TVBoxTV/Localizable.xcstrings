@@ -1,0 +1,506 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%@ · %@ s": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ 秒"
+          }
+        }
+      }
+    },
+    "%lld sources": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个片源"
+          }
+        }
+      }
+    },
+    "%lld sources did not respond.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个接口未能返回结果。"
+          }
+        }
+      }
+    },
+    "A secure connection could not be established. Check the stream address or switch sources.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法建立安全连接。请检查播放地址或切换片源。"
+          }
+        }
+      }
+    },
+    "Add": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加"
+          }
+        }
+      }
+    },
+    "Add a compatible subscription in Sources.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在「片源」中添加兼容的订阅。"
+          }
+        }
+      }
+    },
+    "Add a searchable source in Sources.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在「片源」中添加可搜索的点播源。"
+          }
+        }
+      }
+    },
+    "Add an M3U or TXT playlist in Sources.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在「片源」中添加 M3U 或 TXT 播放列表。"
+          }
+        }
+      }
+    },
+    "Add source": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加片源"
+          }
+        }
+      }
+    },
+    "All": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
+    "Browse": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "片库"
+          }
+        }
+      }
+    },
+    "Category": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分类"
+          }
+        }
+      }
+    },
+    "Checking %lld of %lld sources": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已查 %1$lld / %2$lld 个片源"
+          }
+        }
+      }
+    },
+    "Close": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭"
+          }
+        }
+      }
+    },
+    "Connecting…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在连接…"
+          }
+        }
+      }
+    },
+    "Enter a valid HTTP or HTTPS address.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入有效的 HTTP 或 HTTPS 地址。"
+          }
+        }
+      }
+    },
+    "History": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放记录"
+          }
+        }
+      }
+    },
+    "HTTPS subscription or playlist address": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTPS 订阅或播放列表地址"
+          }
+        }
+      }
+    },
+    "Live source": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直播源"
+          }
+        }
+      }
+    },
+    "Live TV": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直播"
+          }
+        }
+      }
+    },
+    "Load more": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加载更多"
+          }
+        }
+      }
+    },
+    "Loading channels…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入频道…"
+          }
+        }
+      }
+    },
+    "Loading episodes…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入剧集…"
+          }
+        }
+      }
+    },
+    "Loading source…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入片源…"
+          }
+        }
+      }
+    },
+    "Loading sources…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入片源…"
+          }
+        }
+      }
+    },
+    "More sources": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看更多片源"
+          }
+        }
+      }
+    },
+    "No matching videos found.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有找到匹配的影片。"
+          }
+        }
+      }
+    },
+    "No other playable source found.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有找到其他可播放的片源。"
+          }
+        }
+      }
+    },
+    "No playable episodes.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可播放的剧集。"
+          }
+        }
+      }
+    },
+    "No playable stream was found for this episode.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有找到本集可播放的线路。"
+          }
+        }
+      }
+    },
+    "No playback history yet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有播放记录。"
+          }
+        }
+      }
+    },
+    "No video source": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有点播源"
+          }
+        }
+      }
+    },
+    "No videos found.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有找到影片。"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确定"
+          }
+        }
+      }
+    },
+    "Play a sample video": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放演示视频"
+          }
+        }
+      }
+    },
+    "Reload source": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新片源"
+          }
+        }
+      }
+    },
+    "Remove source": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除片源"
+          }
+        }
+      }
+    },
+    "Remove source?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除这个片源？"
+          }
+        }
+      }
+    },
+    "Retry": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
+    "Search": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索"
+          }
+        }
+      }
+    },
+    "Sources": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "片源"
+          }
+        }
+      }
+    },
+    "Switch source": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "换源"
+          }
+        }
+      }
+    },
+    "There are too many saved source addresses. Remove an unused source and try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存的地址太多，请移除不用的片源后再试。"
+          }
+        }
+      }
+    },
+    "This playlist contains no compatible HTTP streams.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个列表没有兼容的 HTTP 视频流。"
+          }
+        }
+      }
+    },
+    "This source is unavailable. Reload it in Sources and try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个片源目前不可用，请在「片源」中刷新后再试。"
+          }
+        }
+      }
+    },
+    "This stream cannot be opened on Apple TV. Try a compatible HLS or MP4 source.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple TV 无法打开这条线路，请尝试兼容的 HLS 或 MP4 源。"
+          }
+        }
+      }
+    },
+    "This stream needs custom request headers that this Apple TV player cannot send.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这条线路需要 Apple TV 播放器暂不支持的自定义请求头。"
+          }
+        }
+      }
+    },
+    "This subscription has no compatible XML, JSON, or live playlist. Android CSP sources require the Mac version.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个订阅没有兼容的 XML、JSON 接口或直播列表。Android CSP 源请在 Mac 版使用。"
+          }
+        }
+      }
+    },
+    "Title": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "影片名称"
+          }
+        }
+      }
+    },
+    "Video source": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点播源"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

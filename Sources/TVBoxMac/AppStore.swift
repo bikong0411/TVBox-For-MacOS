@@ -897,7 +897,14 @@ enum LiveLayout: String, CaseIterable, Identifiable {
             }
         }
     }
-    var displayedVideos: [Video] { videos.filter { isVisible($0, site: site) } }
+    var filtersLoadedVideos: Bool { site?.searchable == false }
+    var displayedVideos: [Video] {
+        let currentSite = site
+        let filter = currentSite?.searchable == false ? submittedQuery : ""
+        return videos.filter { video in
+            (filter.isEmpty || video.title.localizedCaseInsensitiveContains(filter)) && isVisible(video, site: currentSite)
+        }
+    }
     func isVisible(_ video: Video, site: Site?) -> Bool {
         guard let site else { return true }
         return (hiddenDetails[LibraryEntry(video: video, site: site).id] ?? .distantPast) <= Date()
@@ -1027,7 +1034,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         }
         guard let source = selectedVODSource, site != nil else { loading = false; return }
         loading = true
-        let selectedCategory = category; let search = submittedQuery; let targetPage = append ? page + 1 : 1
+        let selectedCategory = category; let search = filtersLoadedVideos ? "" : submittedQuery; let targetPage = append ? page + 1 : 1
         let selectedSiteID = siteID
         catalogTask = Task {
             do {
@@ -1071,7 +1078,12 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         persistSelection(); refreshLive(force: false)
     }
     func showImport(_ target: SourceImportTarget = .automatic) { importTarget = target; importError = nil; importSheet = true }
-    func search() { submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines); category = ""; refresh() }
+    func search() {
+        submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !filtersLoadedVideos else { return }
+        category = ""
+        refresh()
+    }
     func selectCategory(_ id: String) { category = id; refresh() }
     func importURL(_ text: String, target: SourceImportTarget = .automatic, name: String = "") async {
         guard let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)), ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") else { importError = "请输入完整的 http:// 或 https:// 配置地址。"; return }

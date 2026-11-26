@@ -116,6 +116,7 @@ struct DiscoverView: View {
                 if let config = store.configuration, config.sites.isEmpty, !config.subscriptions.isEmpty {
                     RepositoryBrowserView(subscriptions: config.subscriptions)
                 } else {
+                    let videos = store.displayedVideos
                     HStack(spacing: 12) {
                         Text(store.submittedQuery.isEmpty ? L10n.text("探索片库") : L10n.text("搜索结果")).font(.system(size: 21, weight: .semibold))
                         if !store.supportedSites.isEmpty {
@@ -126,11 +127,11 @@ struct DiscoverView: View {
                         Spacer()
                         HStack(spacing: 8) {
                             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
-                            TextField(L10n.text("搜索当前影视源"), text: $store.query).textFieldStyle(.plain).onSubmit { store.search() }
+                            TextField(L10n.text(store.filtersLoadedVideos ? "该源暂不支持搜索" : "搜索当前影视源"), text: $store.query)
+                                .textFieldStyle(.plain).onSubmit(store.search)
                             if !store.query.isEmpty { Button { store.query = ""; store.search() } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Theme.muted) }
                         }.font(.system(size: 12)).padding(11).frame(width: 225).background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
-                        .disabled(store.site?.searchable == false)
-                        Button(L10n.text("聚合搜索")) { store.searchAll(store.query) }.fixedSize()
+                        Button(L10n.text("搜索"), action: store.search).fixedSize()
                     }
                     if !store.categories.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -156,7 +157,7 @@ struct DiscoverView: View {
                             }
                         }
                     }
-                    if store.loading && store.displayedVideos.isEmpty {
+                    if store.loading && videos.isEmpty {
                         VStack(spacing: 12) {
                             ProgressView(L10n.text("正在加载影视源…"))
                             if store.site?.requiresCSP == true {
@@ -171,11 +172,11 @@ struct DiscoverView: View {
                         }.frame(maxWidth: .infinity).padding(70)
                     } else if !store.isDemo && store.supportedSites.isEmpty {
                         EmptyViewCard(icon: "puzzlepiece.extension", title: L10n.text("暂时没有可调用的接口"), message: L10n.text("Java / CSP 接口需要完整运行时及有效的 spider 配置。旧配置请先在配置管理中刷新一次，也可以切换其他接口。"), action: L10n.text("查看配置")) { store.section = .sources }
-                    } else if store.displayedVideos.isEmpty && store.catalogError == nil && store.page >= store.pageCount {
+                    } else if videos.isEmpty && store.catalogError == nil && store.page >= store.pageCount {
                         EmptyViewCard(icon: "magnifyingglass", title: L10n.text("没有找到影片"), message: L10n.text("试试其他关键词、分类或影视源。"))
                     } else {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 25) {
-                            ForEach(Array(store.displayedVideos.enumerated()), id: \.element.id) { index, video in
+                            ForEach(Array(videos.enumerated()), id: \.element.id) { index, video in
                                 VideoCard(video: video, index: index) { store.show(video, site: store.site) }
                             }
                         }

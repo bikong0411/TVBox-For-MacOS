@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// Owns a supervisor through an anonymous pipe. Closing it requests graceful
@@ -175,3 +176,4 @@ public actor CSPBundledRuntime: CSPRuntimeProvider {
     /// The supervisor performs bounded graceful shutdown independently.
     public nonisolated func stop() { owner.stop() }
 }
+#endif
