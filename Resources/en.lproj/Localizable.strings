@@ -430,7 +430,9 @@
 "请用片源对应的手机 App 扫码，并在手机上核对授权内容。" = "Scan with the source’s mobile app and review the authorization request on your phone.";
 "二维码无法显示，请重试获取。" = "The QR code could not be displayed. Try requesting it again.";
 "重试获取二维码" = "Request code again";
-"已扫码，重试播放" = "Scanned, retry playback";
+"已扫码，继续播放" = "Scanned, continue playback";
+"片源要求登录，但没有提供二维码。请在片源端授权，或切换线路。" = "The source requires sign-in and did not provide a QR code. Authorize with the source or switch lines.";
+"片源提示" = "Message from the source";
 "支持视频直链，也可尝试从播放网页查找公开的视频地址。" = "Play direct video URLs or look for a media URL published on a playback page.";
 "正在检查网页中的视频地址…" = "Looking for a media URL on the page…";
 "这个地址打开的是网页，未找到可直接播放的视频。请在浏览器打开，或使用片源提供的视频直链。" = "This URL opens a web page. No direct media URL was found. Open the page in a browser or use a direct URL from the source.";

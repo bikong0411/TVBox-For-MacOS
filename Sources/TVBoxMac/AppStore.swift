@@ -347,7 +347,17 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         connectionStartedAt = Date(); connectingMessage = L10n.string(message)
     }
     @Published var error: String?
-    @Published var playbackAuthorization: CSPPlaybackAuthorization?
+    @Published var playbackAuthorization: CSPPlaybackAuthorization? {
+        didSet { showsPlaybackAuthorization = playbackAuthorization != nil }
+    }
+    @Published var showsPlaybackAuthorization = false
+    @Published private(set) var playbackLoginMessage: String?
+
+    func showPlaybackResolutionError(_ failure: Error) {
+        error = L10n.string(failure.localizedDescription)
+        playbackAuthorization = failure as? CSPPlaybackAuthorization
+        playbackLoginMessage = (failure as? CSPPlaybackLoginRequired)?.sourceMessage
+    }
     @Published var failure: PlaybackFailure?
     @Published var ready = false
     @Published var rate: Float = 1
@@ -842,6 +852,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private func clearAttempt() {
         cancelLiveBackup()
         playbackAuthorization = nil
+        playbackLoginMessage = nil
         cancelAirPlayPreparation()
         mpvLoadTask?.cancel(); mpvLoadTask = nil
         mpvNetworkTask?.cancel(); mpvNetworkTask = nil
@@ -1434,8 +1445,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                 startInternalPlayback(position: position)
             } catch {
                 guard !Task.isCancelled, resolutionID == token, playback != nil else { return }
-                player.error = L10n.string(error.localizedDescription)
-                player.playbackAuthorization = error as? CSPPlaybackAuthorization
+                player.showPlaybackResolutionError(error)
                 if error is CSPPlaybackUnavailable {
                     await availability.markCrawlerUnavailable(site: site, line: current.line, episode: current.episode)
                     let options = await availability.filter([current.video], site: site, probeLimit: 0)

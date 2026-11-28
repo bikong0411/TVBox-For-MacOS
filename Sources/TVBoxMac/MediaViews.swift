@@ -290,12 +290,12 @@ struct PlaybackSurface: View {
             ZStack {
                 Color.black
                 let isActiveSurface = !fullscreen.isPresented || isFullscreen
-                if isActiveSurface, let authorization = controller.playbackAuthorization {
+                if isActiveSurface, controller.showsPlaybackAuthorization, let authorization = controller.playbackAuthorization {
                     PlaybackAuthorizationPrompt(
                         authorization: authorization,
                         sourceName: current.site?.name ?? current.line.name,
                         retry: { store.retryPlayback() },
-                        dismiss: { controller.playbackAuthorization = nil }
+                        dismiss: { controller.showsPlaybackAuthorization = false }
                     )
                 } else if isActiveSurface {
                 NativePlayerView(surface: controller.videoSurface, isFullscreen: isFullscreen, onSeek: { offset in
@@ -312,10 +312,23 @@ struct PlaybackSurface: View {
                         let fromWebPage = current.webPageURL != nil && current.resolvedEpisode != nil
                         Text(fromWebPage ? L10n.text("已找到网页中的视频地址，但视频仍无法播放。") + "\n" + error : error)
                             .font(.system(size: 12)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).frame(maxWidth: 420)
+                        if let message = controller.playbackLoginMessage {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(L10n.text("片源提示")).fontWeight(.semibold)
+                                Text(verbatim: message).foregroundStyle(Theme.muted).lineLimit(5).help(message)
+                            }
+                            .font(.system(size: 12))
+                            .frame(maxWidth: 420, alignment: .leading)
+                        }
                         HStack {
+                            if controller.playbackAuthorization != nil {
+                                Button(L10n.text("扫码授权")) { controller.showsPlaybackAuthorization = true }
+                            }
                             Button(current.isLive && current.line.episodes.count > 1 ? L10n.text("重试全部线路") : L10n.text("重试")) { store.retryPlayback() }
                             if current.isLive && current.line.episodes.count > 1 { Button(L10n.text("下一条线路")) { store.nextLiveRoute() } }
-                            Button(L10n.text("复制地址")) { store.copyURL() }
+                            if current.resolvedEpisode != nil || current.site?.requiresCSP != true {
+                                Button(L10n.text("复制地址")) { store.copyURL() }
+                            }
                             if isFullscreen { PlaybackSourceSwitchButton(current: current) }
                             if let url = current.webPageURL {
                                 Link(L10n.text("在浏览器打开网页"), destination: url)

@@ -112,6 +112,10 @@ private actor CSPFixture: CSPTransport {
             (#"{"url":"","qrcode":"https://auth.example.invalid/scan?fixture=1"}"#, CSPPlaybackAuthorization.code(payload)),
             (#"{"parse":1,"url":"https://auth.example.invalid/sign-in","auth":{"qrCode":"https://auth.example.invalid/scan?fixture=1"}}"#, .code(payload)),
             (#"{"auth":{"qr_image":"data:image/png;base64,iVBORw0KGgo="}}"#, .image(Data([137, 80, 78, 71, 13, 10, 26, 10]))),
+            (#"{"error":{"auth":{"qr":{"content":"https://auth.example.invalid/scan?fixture=1"}}}}"#, .code(payload)),
+            (#"{"data":{"authorization":{"method":"qr","payload":"https://auth.example.invalid/scan?fixture=1"}}}"#, .code(payload)),
+            (#"{"status":"qr_required","url":"https://auth.example.invalid/login","data":{"qrBase64":"iVBORw0KGgo="}}"#, .image(Data([137, 80, 78, 71, 13, 10, 26, 10]))),
+            (#"{"code":401,"msg":"请先登录夸克","auth":{"qrcode":"https://auth.example.invalid/scan?fixture=1"}}"#, .code(payload)),
         ]
         for (response, expected) in responses {
             do {
@@ -121,6 +125,44 @@ private actor CSPFixture: CSPTransport {
                 #expect((error as? CSPPlaybackAuthorization) == expected)
                 #expect(!error.localizedDescription.contains(payload))
             }
+        }
+    }
+    @Test(arguments: ["夸克网盘请先配置 Cookie 或登录", "夸克网盘请先在设置里登录，然后配置 Cookie"])
+    func explainsCookieLoginWithoutPretendingThereIsAQRCode(message: String) throws {
+        let response = try JSONSerialization.data(withJSONObject: ["msg": message, "parse": 0, "jx": 0])
+        do {
+            _ = try CSPPlayback(data: response)
+            Issue.record("Expected a missing login challenge")
+        } catch {
+            #expect(!(error is CSPPlaybackAuthorization))
+            #expect(error.localizedDescription.contains("没有提供二维码"))
+            #expect(!error.localizedDescription.contains("Cookie"))
+            #expect((error as? CSPPlaybackLoginRequired)?.sourceMessage == message)
+        }
+    }
+    @Test func loginMessagePreservesGuidanceAndRedactsCredentialsAndPrivateLinks() throws {
+        let response = try JSONSerialization.data(withJSONObject: [
+            "error": ["code": 401, "message": "<p>请在夸克 App 内登录并完成授权。</p><br>Cookie: key=shortCookie; sid=privateSid\nAuthorization: Bearer privateBearer\naccess_token=\"secretAccess\"，https://auth.fixture.invalid/login?ticket=privateTicket<script>privateScript</script>"]
+        ])
+        do {
+            _ = try CSPPlayback(data: response)
+            Issue.record("Expected a sign-in request")
+        } catch let login as CSPPlaybackLoginRequired {
+            let hint = try #require(login.sourceMessage)
+            #expect(hint.contains("请在夸克 App 内登录并完成授权。"))
+            #expect(hint.contains("[…]"))
+            for secret in ["shortCookie", "privateSid", "privateBearer", "secretAccess", "privateTicket", "privateScript", "https://", "<p>"] {
+                #expect(!hint.contains(secret))
+            }
+        }
+    }
+
+    @Test func loginStatusWithoutAProviderMessageUsesOnlyTheLocalizedError() throws {
+        do {
+            _ = try CSPPlayback(data: Data(#"{"code":401,"error":"UNAUTHORIZED"}"#.utf8))
+            Issue.record("Expected a sign-in request")
+        } catch let login as CSPPlaybackLoginRequired {
+            #expect(login.sourceMessage == nil)
         }
     }
     @Test func ignoresInvalidOrIrrelevantQRCodeFields() throws {

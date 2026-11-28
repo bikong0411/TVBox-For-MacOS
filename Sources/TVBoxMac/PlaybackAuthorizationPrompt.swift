@@ -30,7 +30,7 @@ struct PlaybackAuthorizationPrompt: View {
             }
             HStack(spacing: 12) {
                 Button(L10n.text("取消"), action: dismiss).keyboardShortcut(.cancelAction)
-                Button(image == nil ? L10n.text("重试获取二维码") : L10n.text("已扫码，重试播放"), action: retry)
+                Button(image == nil ? L10n.text("重试获取二维码") : L10n.text("已扫码，继续播放"), action: retry)
                     .buttonStyle(.borderedProminent)
             }
         }
