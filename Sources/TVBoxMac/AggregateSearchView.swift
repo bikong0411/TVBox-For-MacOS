@@ -23,11 +23,24 @@ import TVBoxCore
         guard searching else { return }
         task = Task { [weak self] in
             var seen = Set<String>()
-            await service.searchAcrossSources(sources, query: keyword, availability: availability) { _, results, success in
+            var previews = [String: [VODSearchHit]]()
+            await service.searchAcrossSources(sources, query: keyword, availability: availability, onPreview: { source, results in
+                guard let self, !Task.isCancelled else { return }
+                let unique = results.filter { seen.insert($0.id).inserted }
+                previews[source.id] = unique
+                if !unique.isEmpty { self.hits += unique }
+            }) { source, results, success in
                 guard let self, !Task.isCancelled else { return }
                 self.completed += 1
                 if !success { self.failed += 1 }
-                self.hits += results.filter { seen.insert($0.id).inserted }
+                if let preview = previews.removeValue(forKey: source.id) {
+                    let checked = Dictionary(results.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                    if preview.contains(where: { checked[$0.id] != $0 }) {
+                        self.hits = self.hits.compactMap { $0.source.id == source.id ? checked[$0.id] : $0 }
+                    }
+                }
+                let added = results.filter { seen.insert($0.id).inserted }
+                if !added.isEmpty { self.hits += added }
             }
             guard !Task.isCancelled else { return }
             self?.searching = false
@@ -254,7 +267,7 @@ private struct PlaybackSourcePicker: View {
             if !initialized {
                 let candidates = VODSearchSource.playbackAlternatives(in: store.searchSources, excluding: current.site)
                 let direct = candidates.filter { $0.site.supported }
-                let crawlers = candidates.filter { !$0.site.supported }
+                let crawlers = VODSearchSource.groupingCrawlers(in: candidates)
                 sources = Array(direct.prefix(6)) + Array(crawlers.prefix(2)) + direct.dropFirst(6) + crawlers.dropFirst(2)
                 if let cached = store.playbackSearchCache.results(for: cacheKey) { results = cached.retaining(sources) }
                 initialized = true

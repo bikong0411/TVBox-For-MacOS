@@ -141,8 +141,14 @@ public struct TVService {
         guard let detail = try Parser.catalog(await data(at: url, headers: site.headers, timeout: timeout), base: url).videos.first else { throw TVError.message("接口未返回这部影片的详情。") }
         return detail
     }
+    public func catalogPreview(_ videos: [Video], site: Site, availability: VODAvailability) async -> [Video] {
+        let candidates = await availability.filterCachedCatalogFailures(videos, site: site)
+        return await availability.filter(candidates, site: site, probeLimit: 0)
+    }
+
     public func checkedCatalogVideos(_ videos: [Video], site: Site?, availability: VODAvailability, probeLimit: Int = 8) async -> [Video] {
         var candidates = videos
+        var resolved = Set<String>()
         if let site, site.supported, probeLimit > 0 {
             let ids = videos.lazy.filter { $0.lines.isEmpty && !$0.id.contains(",") }.prefix(probeLimit).map(\.id)
             if !ids.isEmpty,
@@ -153,11 +159,20 @@ public struct TVService {
                 let lines = Dictionary(detail.videos.filter { requested.contains($0.id) && !$0.lines.isEmpty }
                     .map { ($0.id, $0.lines) }, uniquingKeysWith: { first, _ in first })
                 for index in candidates.indices where candidates[index].lines.isEmpty {
-                    if let resolved = lines[candidates[index].id] { candidates[index].lines = resolved }
+                    if let detail = lines[candidates[index].id] {
+                        candidates[index].lines = detail
+                        resolved.insert(candidates[index].id)
+                    }
                 }
             }
         }
-        let checked = await availability.filter(candidates, site: site, probeLimit: probeLimit)
+        var checked = await availability.filter(candidates, site: site, probeLimit: probeLimit)
+        if let site, site.supported, !Task.isCancelled {
+            if !resolved.isEmpty {
+                await availability.rememberCatalogChecks(site: site, resolved: resolved, visible: Set(checked.map(\.id)))
+            }
+            checked = await availability.filterCachedCatalogFailures(checked, site: site)
+        }
         let summaries = Set(videos.filter { $0.lines.isEmpty }.map(\.id))
         // Keep catalog summaries as summaries so opening one still loads full details.
         return checked.map { video in

@@ -306,30 +306,54 @@ struct VideoCard: View {
 struct PosterView: View {
     let video: Video
     var index: Int = 0
+    @Environment(\.displayScale) private var displayScale
+    @State private var thumbnail: (url: URL, image: CGImage)?
     private var colors: [Color] {
         let palette: [[Color]] = [[Color(red: 0.18, green: 0.39, blue: 0.34), Color(red: 0.05, green: 0.14, blue: 0.14)], [Color(red: 0.43, green: 0.25, blue: 0.24), Color(red: 0.14, green: 0.09, blue: 0.16)], [.indigo.opacity(0.7), Theme.panel], [.brown, Theme.panel]]
         return palette[index % palette.count]
     }
     var body: some View {
         GeometryReader { bounds in
-        AsyncImage(url: URL(string: video.poster)) { image in image.resizable().scaledToFill() } placeholder: {
+            let url = URL(string: video.poster).flatMap { $0.scheme == nil ? nil : $0 }
+            let isSVG = url?.pathExtension.lowercased() == "svg"
+            let request = isSVG ? nil : url.flatMap { PosterThumbnailRequest(url: $0, size: bounds.size, scale: displayScale) }
             ZStack {
-                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                GeometryReader { geometry in
-                    Circle().stroke(.white.opacity(0.08), lineWidth: 1).frame(width: geometry.size.width * 1.2).offset(x: geometry.size.width * 0.10, y: geometry.size.height * 0.18)
-                    Circle().fill(.white.opacity(0.04)).frame(width: geometry.size.width * 0.8).offset(x: geometry.size.width * 0.35, y: geometry.size.height * 0.35)
+                if isSVG {
+                    AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { placeholder }
+                } else if let thumbnail, thumbnail.url == url {
+                    Image(decorative: thumbnail.image, scale: 1).resizable().scaledToFill()
+                } else {
+                    placeholder
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(video.year.isEmpty ? "TVBOX" : video.year).font(.system(size: 10, weight: .medium, design: .monospaced)).tracking(3).foregroundStyle(.white.opacity(0.5))
-                    Spacer()
-                    Image(systemName: index % 2 == 0 ? "film" : "sparkles").font(.system(size: 35, weight: .ultraLight)).foregroundStyle(.white.opacity(0.6))
-                    Text(video.title).font(.system(size: 24, weight: .semibold, design: .serif)).foregroundStyle(.white.opacity(0.9)).lineLimit(3)
-                    Rectangle().fill(Theme.accent.opacity(0.7)).frame(width: 25, height: 2)
-                    Spacer().frame(height: 25)
-                }.padding(20)
             }
-        }.frame(width: bounds.size.width, height: bounds.size.height).clipped()
+            .frame(width: bounds.size.width, height: bounds.size.height)
+            .clipped()
+            .task(id: request) {
+                guard !Task.isCancelled else { return }
+                if thumbnail?.url != url { thumbnail = nil }
+                guard let request, let image = try? await PosterThumbnailLoader.shared.thumbnail(for: request),
+                      !Task.isCancelled else { return }
+                thumbnail = (request.url, image)
+            }
+            .onDisappear { thumbnail = nil }
         }.clipped()
+    }
+    private var placeholder: some View {
+        ZStack {
+            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+            GeometryReader { geometry in
+                Circle().stroke(.white.opacity(0.08), lineWidth: 1).frame(width: geometry.size.width * 1.2).offset(x: geometry.size.width * 0.10, y: geometry.size.height * 0.18)
+                Circle().fill(.white.opacity(0.04)).frame(width: geometry.size.width * 0.8).offset(x: geometry.size.width * 0.35, y: geometry.size.height * 0.35)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                Text(video.year.isEmpty ? "TVBOX" : video.year).font(.system(size: 10, weight: .medium, design: .monospaced)).tracking(3).foregroundStyle(.white.opacity(0.5))
+                Spacer()
+                Image(systemName: index % 2 == 0 ? "film" : "sparkles").font(.system(size: 35, weight: .ultraLight)).foregroundStyle(.white.opacity(0.6))
+                Text(video.title).font(.system(size: 24, weight: .semibold, design: .serif)).foregroundStyle(.white.opacity(0.9)).lineLimit(3)
+                Rectangle().fill(Theme.accent.opacity(0.7)).frame(width: 25, height: 2)
+                Spacer().frame(height: 25)
+            }.padding(20)
+        }
     }
 }
 

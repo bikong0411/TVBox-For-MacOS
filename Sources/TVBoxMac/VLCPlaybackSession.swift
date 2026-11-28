@@ -34,6 +34,8 @@ import AppKit
             }
         }
         player.media = media
+        player.audio?.volume = desiredVolume
+        player.audio?.isMuted = desiredMuted
     }
     func start() {
         // Order teardown and subsequent starts outside the UI event handler.

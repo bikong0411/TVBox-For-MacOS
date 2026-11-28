@@ -5,12 +5,34 @@ import Foundation
 public actor VODAvailability {
     private struct Entry { let unavailable: Bool; let expires: Date }
     private struct CrawlerEpisode: Hashable { let site: Site; let line: String; let address: String }
+    private struct CatalogTitle: Hashable { let site: Site; let id: String }
     private let prober: NetworkProber
     private var cache: [ProbeRequestKey: Entry] = [:]
     private var pending = Set<ProbeRequestKey>()
     private var crawlerFailures: [CrawlerEpisode: Date] = [:]
+    private var catalogFailures: [CatalogTitle: Date] = [:]
 
     public init(prober: NetworkProber = NetworkProber()) { self.prober = prober }
+
+    func filterCachedCatalogFailures(_ videos: [Video], site: Site) -> [Video] {
+        let now = Date()
+        guard !catalogFailures.isEmpty else { return videos }
+        return videos.filter { video in
+            !video.lines.isEmpty || (catalogFailures[CatalogTitle(site: site, id: video.id)] ?? .distantPast) <= now
+        }
+    }
+
+    func rememberCatalogChecks(site: Site, resolved: Set<String>, visible: Set<String>) {
+        let expires = Date().addingTimeInterval(120)
+        for id in resolved {
+            let key = CatalogTitle(site: site, id: id)
+            catalogFailures[key] = visible.contains(id) ? nil : expires
+        }
+        if catalogFailures.count > 512 {
+            let newest = catalogFailures.sorted { $0.value > $1.value }.prefix(512)
+            catalogFailures = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
+        }
+    }
 
     public func markCrawlerUnavailable(site: Site, line: PlayLine, episode: Episode) {
         crawlerFailures = crawlerFailures.filter { $0.value > Date() }

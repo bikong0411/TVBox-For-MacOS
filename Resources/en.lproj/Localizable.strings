@@ -192,6 +192,7 @@
 "搜索大约需要几秒钟。" = "Searching usually takes a few seconds.";
 "搜索当前影视源" = "Search current source";
 "该源暂不支持搜索" = "This source doesn't support search";
+"爬虫已达到可同时加载的接口数量，请重试当前接口。" = "The crawler reached its loaded source limit. Retry this source.";
 "搜索结果" = "Search results";
 "搜索频道" = "Search channels";
 "播放" = "Play";

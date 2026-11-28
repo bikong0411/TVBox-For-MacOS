@@ -49,10 +49,30 @@ import Testing
         configuration.protocolClasses = [VODSearchProtocol.self]
         let service = TVService(session: URLSession(configuration: configuration))
         let site = Site(key: "cms", name: "CMS", type: 1, api: fixture + "/batch")
-        let checked = await service.checkedCatalogVideos([video("Bad"), video("Good"), video("Unknown")],
-                                                        site: site, availability: availability())
+        let items = [video("Bad"), video("Good"), video("Unknown")]
+        let checker = availability()
+        let preview = await service.catalogPreview(items, site: site, availability: checker)
+        #expect(preview.map(\.title) == ["Bad", "Good", "Unknown"])
+        let checked = await service.checkedCatalogVideos(items, site: site, availability: checker)
         #expect(checked.map(\.title) == ["Good", "Unknown"])
         #expect(checked.first?.lines.isEmpty == true)
+        let repeated = await service.catalogPreview(items, site: site, availability: checker)
+        #expect(repeated == checked)
+    }
+
+    @MainActor @Test func aggregateSearchPublishesPreviewThenRemoveUnavailableResults() async {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [VODSearchProtocol.self]
+        let service = TVService(session: URLSession(configuration: configuration))
+        let source = VODSearchSource(subscription: "Test",
+            site: Site(key: "mixed", name: "Mixed", type: 1, api: fixture + "/search-mixed"))
+        var results: [[String]] = []
+        await service.searchAcrossSources([source], query: "Example", availability: availability(),
+            onPreview: { _, hits in results.append(hits.map(\.video.id)) }) { _, hits, success in
+            #expect(success)
+            results.append(hits.map(\.video.id))
+        }
+        #expect(results == [["unrelated", "remake", "expired", "ready"], ["unrelated", "remake", "ready"]])
     }
 
     @Test func switchingMatchesEpisodeLabelsRatherThanArrayOffsets() throws {
@@ -108,6 +128,30 @@ import Testing
         #expect(Set(hits.map(\.source.id)) == ["first", "second"])
         #expect(Set(hits.map(\.id)).count == 2)
         #expect(failures == 1)
+    }
+
+    @MainActor @Test func aggregateSearchGroupsCrawlerComponentsAndChecksEverySource() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [VODSearchProtocol.self]
+        let crawler = SearchCrawlerFixture()
+        let service = TVService(session: URLSession(configuration: configuration), csp: crawler)
+        func source(_ id: String, component: String, searchable: Bool = true) throws -> VODSearchSource {
+            let definition = try CSPDefinition(component: CSPComponent(fixture + "/" + component), api: "csp_Test")
+            return VODSearchSource(subscription: id, site: Site(key: id, name: id, type: 3,
+                api: "csp_Test", searchable: searchable, csp: definition))
+        }
+        let direct = VODSearchSource(subscription: "Direct", site: Site(key: "direct", name: "Direct", type: 1,
+            api: fixture + "/search-first"))
+        let sources = try [source("a1", component: "a.jar"), source("b1", component: "b.jar"), direct,
+                           source("a2", component: "a.jar"), source("a3", component: "a.jar", searchable: false)]
+        var checked: [String] = []
+        await service.searchAcrossSources(sources, query: "Example", availability: availability()) { source, _, success in
+            #expect(success)
+            checked.append(source.id)
+        }
+        #expect(await crawler.requested == ["a1", "a2", "b1"])
+        #expect(Set(checked) == ["a1", "a2", "b1", "direct"])
+        #expect(checked.count == 4)
     }
 
     @MainActor @Test func playbackSearchIgnoresUnrelatedAndExpiredCatalogResults() async {
@@ -184,6 +228,14 @@ import Testing
         let alternatives = VODSearchSource.playbackAlternatives(
             in: sites.map { VODSearchSource(subscription: "Test", site: $0) }, excluding: current)
         #expect(alternatives.map(\.id) == ["distinct"])
+    }
+}
+
+private actor SearchCrawlerFixture: CSPTransport {
+    private(set) var requested: [String] = []
+    func invoke(site: Site, command: CSPCommand, arguments: [String: String]) async throws -> Data {
+        requested.append(site.id)
+        return Data(#"{"list":[]}"#.utf8)
     }
 }
 

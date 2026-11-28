@@ -28,6 +28,17 @@ public struct VODSearchSource: Identifiable, Hashable, Sendable {
         if let current { seen.insert(RequestIdentity(current)) }
         return sources.filter { $0.id != current?.id && seen.insert(RequestIdentity($0.site)).inserted }
     }
+
+    public static func groupingCrawlers(in sources: [Self]) -> [Self] {
+        var keys: [CSPComponent] = []
+        var groups: [CSPComponent: [Self]] = [:]
+        for source in sources {
+            guard source.site.requiresCSP, let component = source.site.csp?.component else { continue }
+            if groups[component] == nil { keys.append(component) }
+            groups[component, default: []].append(source)
+        }
+        return keys.flatMap { groups[$0, default: []] }
+    }
 }
 
 public struct VODSearchHit: Identifiable, Hashable, Sendable {
@@ -187,11 +198,14 @@ public extension TVService {
     /// Search the first result page of each interface, publishing as it finishes.
     func searchAcrossSources(_ sources: [VODSearchSource], query: String, availability: VODAvailability,
                               matching playback: VODPlaybackSearch? = nil,
+                              onPreview: (@MainActor (VODSearchSource, [VODSearchHit]) -> Void)? = nil,
                               onSource: @MainActor (VODSearchSource, [VODSearchHit], Bool) -> Void) async {
         let candidates = sources.filter { $0.site.searchable && supports($0.site) }
         let maxConcurrentSources = 8
+        let crawlers = VODSearchSource.groupingCrawlers(in: candidates)
         await withTaskGroup(of: (VODSearchSource, [VODSearchHit], Bool).self) { group in
-            var next = candidates.makeIterator()
+            var direct = candidates.lazy.filter { !$0.site.requiresCSP }.makeIterator()
+            var crawler = crawlers.makeIterator()
             func enqueue(_ source: VODSearchSource) {
                 group.addTask {
                     do {
@@ -201,6 +215,13 @@ public extension TVService {
                             checked = await self.playbackCandidate(in: catalog.videos, site: source.site,
                                                                    matching: playback, availability: availability).map { [$0] } ?? []
                         } else {
+                            if source.site.supported, let onPreview {
+                                let preview = await self.catalogPreview(catalog.videos, site: source.site, availability: availability)
+                                try Task.checkCancellation()
+                                if !preview.isEmpty {
+                                    await onPreview(source, preview.map { VODSearchHit(video: $0, source: source) })
+                                }
+                            }
                             checked = await self.checkedCatalogVideos(catalog.videos, site: source.site, availability: availability, probeLimit: 4)
                         }
                         return (source, checked.map { VODSearchHit(video: $0, source: source) }, true)
@@ -209,13 +230,19 @@ public extension TVService {
                     }
                 }
             }
-            for _ in 0..<min(maxConcurrentSources, candidates.count) {
-                if let source = next.next() { enqueue(source) }
+            // The current Android worker is shared by every JAR. Keep one
+            // crawler in flight, including its detail lookup for source switching.
+            let directSlots = crawlers.isEmpty ? maxConcurrentSources : maxConcurrentSources - 1
+            for _ in 0..<directSlots {
+                guard let source = direct.next() else { break }
+                enqueue(source)
             }
+            if let source = crawler.next() { enqueue(source) }
             while let (source, hits, success) = await group.next() {
                 guard !Task.isCancelled else { group.cancelAll(); break }
                 await onSource(source, hits, success)
-                if let source = next.next() { enqueue(source) }
+                guard !Task.isCancelled else { group.cancelAll(); break }
+                if let next = source.site.requiresCSP ? crawler.next() : direct.next() { enqueue(next) }
             }
         }
     }

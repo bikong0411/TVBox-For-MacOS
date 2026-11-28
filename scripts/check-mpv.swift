@@ -119,6 +119,20 @@ import TVBoxCore
             try await Task.sleep(nanoseconds: 2_000_000_000)
             try require(controller.mpvSession === replacement && controller.ready && controller.error == nil, "Cancelled network input overwrote the next video")
             print("PASS: final failure includes mpv code; cancelling an in-flight compatible input preserves the next video")
+
+            var routes: [Int] = []
+            let started = ContinuousClock.now
+            controller.playLive([
+                Episode(name: "Slow", url: "http://127.0.0.1:18791/slow.mp4"),
+                Episode(name: "Backup", url: "http://127.0.0.1:18791/test.mp4")
+            ], index: 0, headers: [:]) { routes.append($0) }
+            try await wait("Backup did not take over from a stalled mpv stream", controller: controller) {
+                controller.ready && controller.position > 0.3 && routes.last == 1
+            }
+            try require(routes == [0, 1] && controller.mpvSession == nil && controller.nativeSession != nil, "Backup left the old decoder active")
+            try require(ContinuousClock.now - started < .seconds(8), "Backup waited too long to take over")
+            print("PASS: decoded VLC backup took over from stalled mpv")
+
             controller.stop()
             try require(controller.mpvSession == nil && controller.nativeSession == nil && !controller.ready,"Stop leaked a decoder")
             let finalIINA = Set(NSRunningApplication.runningApplications(withBundleIdentifier: "com.colliderli.iina").map(\.processIdentifier))

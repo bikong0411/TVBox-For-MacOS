@@ -5,9 +5,40 @@ import Testing
 
 private struct RecoveryRuntime: CSPRuntimeProvider {
     let worker: CSPWorkerConnection
+    var replacement: CSPWorkerConnection?
     func connection(componentHash: String) async throws -> CSPWorkerConnection { worker }
+    func renewConnection(componentHash: String, replacing previous: CSPWorkerConnection) async throws -> CSPWorkerConnection {
+        #expect(previous.token == worker.token)
+        return replacement ?? worker
+    }
 }
 @Suite struct CSPRPCRecoveryTests {
+    @Test func searchCanContinueWhenTheWorkerHitsItsSessionLimit() async throws {
+        let jar = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jar")
+        try Data([0x50, 0x4b, 1, 2]).write(to: jar)
+        defer { try? FileManager.default.removeItem(at: jar) }
+        let endpoint = try #require(URL(string: "http://127.0.0.1:18793"))
+        let firstToken = SHA256.hash(data: Data(UUID().uuidString.utf8)).map { String(format: "%02x", $0) }.joined()
+        let secondToken = SHA256.hash(data: Data(UUID().uuidString.utf8)).map { String(format: "%02x", $0) }.joined()
+        RecoveryProtocol.register(firstToken, persistent: false, loadError: ["error": "SESSION_LIMIT"])
+        RecoveryProtocol.register(secondToken, persistent: false)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RecoveryProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let runtime = RecoveryRuntime(worker: try CSPWorkerConnection(endpoint: endpoint, token: firstToken),
+                                      replacement: try CSPWorkerConnection(endpoint: endpoint, token: secondToken))
+        let transport = CSPRPCTransport(runtime: runtime, session: session, localOverride: session)
+        let definition = try CSPDefinition(component: CSPComponent(jar.absoluteString), api: "csp_Fixture")
+        let site = Site(key: "fixture", name: "Fixture", type: 3, api: "csp_Fixture", csp: definition)
+        let data = try await transport.invoke(site: site, command: .search, arguments: ["query": "fixture"])
+        #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["list"] != nil)
+        let full = RecoveryProtocol.counts(firstToken)
+        let renewed = RecoveryProtocol.counts(secondToken)
+        #expect(full.loads == 1 && full.calls == 0)
+        #expect(renewed.loads == 2 && renewed.calls == 2)
+    }
+
     @Test func entryMismatchAndMissingLibrariesHaveDifferentMessagesWithoutRetry() async throws {
         for code in ["ENTRY_CLASS_MISSING", "CLASS_DEPENDENCY_MISSING", "SDK_ABI_MISMATCH"] {
             let jar=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jar")

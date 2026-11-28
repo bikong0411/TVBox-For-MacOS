@@ -28,6 +28,27 @@ import Testing
         runtime.stop()
     }
     @Test(.enabled(if: ProcessInfo.processInfo.environment["TVBOX_CSP_TEST_ASSETS"] != nil))
+    func preparedRuntimeIsSharedByConcurrentRequests() async throws {
+        let location = try #require(ProcessInfo.processInfo.environment["TVBOX_CSP_TEST_ASSETS"])
+        let assets = URL(fileURLWithPath: location)
+        let storage = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tvbox-csp-preparation-test-" + UUID().uuidString)
+        let runtime = CSPBundledRuntime(assets: assets, storage: storage)
+        defer { runtime.stop() }
+        let component = String(repeating: "a", count: 64)
+        await runtime.prepare()
+        async let first = runtime.connection(componentHash: component)
+        async let second = runtime.connection(componentHash: component)
+        let connections = try await (first, second)
+        #expect(connections.0.token == connections.1.token)
+        #expect(connections.0.endpoint == connections.1.endpoint)
+        let renewed = try await runtime.renewConnection(componentHash: component, replacing: connections.0)
+        #expect(renewed.token != connections.0.token)
+        let reused = try await runtime.renewConnection(componentHash: component, replacing: connections.1)
+        #expect(reused.token == renewed.token)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TVBOX_CSP_TEST_ASSETS"] != nil))
     func actualBundledRuntimeLoadsComponentThroughSwiftTransport() async throws {
         let environment = ProcessInfo.processInfo.environment
         let assets = URL(fileURLWithPath: try #require(environment["TVBOX_CSP_TEST_ASSETS"]))

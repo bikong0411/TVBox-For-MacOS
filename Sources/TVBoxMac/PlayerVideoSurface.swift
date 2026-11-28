@@ -97,13 +97,18 @@ final class VideoRenderingView: NSView {
     }
     required init?(coder: NSCoder) { nil }
     func prepareVLCView() -> VLCVideoView {
-        vlcView.removeFromSuperview()
         let next = VLCVideoView(frame: bounds)
         next.backColor = .black; next.fillScreen = false
+        useVLCView(next)
+        return next
+    }
+    func useVLCView(_ next: VLCVideoView) {
+        vlcView.removeFromSuperview()
+        next.removeFromSuperview()
+        next.frame = bounds
         next.isHidden = !systemView.isHidden
         addSubview(next, positioned: .below, relativeTo: systemView)
         vlcView = next
-        return next
     }
     func setMPVView(_ value: MPVRenderingView?) {
         mpvView?.removeFromSuperview(); mpvView = value

@@ -111,6 +111,21 @@ import VLCKit
             catch { print("Routes:", routes, "state:", controller.nativeSession?.player.state.rawValue ?? -1, "ready:", controller.ready, "error:", controller.error ?? "none"); throw error }
             try require(routes == [0, 1] && !controller.systemPlayback, "Live fallback repeated a route or used external playback")
             try require(!controller.seekRelative(by: 3), "Live playback consumed arrow seek")
+
+            routes = []
+            let started = ContinuousClock.now
+            controller.playLive([Episode(name: "慢线路", url: server + "slow.mp4"), Episode(name: "备用", url: server + "test.mp4")], index: 0, headers: [:]) { routes.append($0) }
+            try await wait("Backup did not take over before the slow route's timeout", seconds: 8) { controller.ready && routes.last == 1 }
+            try require(routes == [0, 1] && controller.nativeSession != nil, "Racing promoted the wrong route or lost the decoder")
+            try await wait("Promoted route stopped advancing") { controller.position > 0.4 }
+            print("PASS: live backup decoded and took over in", ContinuousClock.now - started)
+
+            routes = []
+            controller.playLive([Episode(name: "快线路", url: server + "test.mp4"), Episode(name: "慢线路", url: server + "slow.mp4")], index: 0, headers: [:]) { routes.append($0) }
+            try await wait("Quick live route did not start") { controller.ready }
+            try await Task.sleep(nanoseconds: 2_500_000_000)
+            try require(routes == [0] && controller.ready, "Fast primary was replaced by a backup")
+
             controller.play(Episode(name: "无效", url: server + "invalid-live.flv"), headers: [:])
             try await wait("Invalid VLC input never terminated", seconds: 38) { controller.error != nil }
             try require(controller.error?.contains("已自动重试 1 次") == true && controller.nativeSession == nil, "VLC retry was not bounded or error not readable")

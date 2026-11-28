@@ -7,6 +7,7 @@ public struct LiveRoutePlan: Sendable {
     public private(set) var attemptedCount = 0
     public let routeCount: Int
     private var pending: [Int]
+    public var nextIndex: Int? { pending.first }
     public init(episodes: [Episode], startingAt index: Int) {
         self.episodes = episodes
         let first = episodes.indices.contains(index) ? index : 0

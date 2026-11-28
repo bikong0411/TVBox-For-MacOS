@@ -16,7 +16,16 @@ public struct CSPWorkerConnection: Sendable {
 }
 
 public protocol CSPRuntimeProvider: Sendable {
+    func prepare() async
     func connection(componentHash: String) async throws -> CSPWorkerConnection
+    func renewConnection(componentHash: String, replacing previous: CSPWorkerConnection) async throws -> CSPWorkerConnection
+}
+
+public extension CSPRuntimeProvider {
+    func prepare() async {}
+    func renewConnection(componentHash: String, replacing previous: CSPWorkerConnection) async throws -> CSPWorkerConnection {
+        try await connection(componentHash: componentHash)
+    }
 }
 
 final class CSPNoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
@@ -26,17 +35,27 @@ final class CSPNoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable
 }
 
 private enum CSPWorkerFailure: LocalizedError {
-    case sessionMissing
-    var errorDescription: String? { "爬虫运行组件已重启，请重试当前接口。" }
+    case sessionMissing, sessionLimit
+    var errorDescription: String? {
+        switch self {
+        case .sessionMissing: return "爬虫运行组件已重启，请重试当前接口。"
+        case .sessionLimit: return "爬虫已达到可同时加载的接口数量，请重试当前接口。"
+        }
+    }
 }
 
 /// The Mac downloads a component as data; only the Android worker loads it.
 public actor CSPRPCTransport: CSPTransport {
+    private struct VerifiedComponent: Sendable {
+        let bytes: Data
+        let hash: String
+    }
+
     private let runtime: any CSPRuntimeProvider
     private let upstream: URLSession
     private let local: URLSession
     private let callTimeout: TimeInterval
-    private var components: [CSPComponent: Task<Data, Error>] = [:]
+    private var components: [CSPComponent: Task<VerifiedComponent, Error>] = [:]
     private var loads: [String: Task<Void, Error>] = [:]
     private var calls: [String: Task<Data, Error>] = [:]
     public init(runtime: any CSPRuntimeProvider, session: URLSession = .shared) {
@@ -55,11 +74,11 @@ public actor CSPRPCTransport: CSPTransport {
         configuration.timeoutIntervalForRequest = callTimeout + 10; configuration.timeoutIntervalForResource = callTimeout + 15
         local = localOverride ?? URLSession(configuration: configuration, delegate: CSPNoRedirect(), delegateQueue: nil)
     }
-    private func component(_ definition: CSPComponent) async throws -> Data {
+    private func component(_ definition: CSPComponent) async throws -> VerifiedComponent {
         if let task = components[definition] { return try await task.value }
         if components.count >= 16 { components.removeAll() }
         let session = upstream
-        let task = Task<Data, Error> {
+        let task = Task<VerifiedComponent, Error> {
             let data: Data
             if definition.url.isFileURL {
                 let size = try definition.url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
@@ -83,11 +102,12 @@ public actor CSPRPCTransport: CSPTransport {
                 data = result
             }
             guard data.starts(with: [0x50, 0x4b]) else { throw TVError.message("下载内容不是有效的 JAR 组件，请刷新源配置。") }
+            let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
             if let algorithm = definition.algorithm, let expected = definition.digest {
-                let digest = algorithm == .sha256 ? SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() : Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                let digest = algorithm == .sha256 ? hash : Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
                 guard digest == expected else { throw CSPFailure.componentChecksumMismatch }
             }
-            return data
+            return VerifiedComponent(bytes: data, hash: hash)
         }
         components[definition] = task
         do { return try await task.value }
@@ -128,16 +148,28 @@ public actor CSPRPCTransport: CSPTransport {
     }
     private func perform(site: Site, command: CSPCommand, arguments: [String: String]) async throws -> (data: Data, connection: CSPWorkerConnection, session: String) {
         guard let definition = site.csp else { throw TVError.message("CSP 接口缺少爬虫组件信息，请刷新配置。") }
-        let data = try await component(definition.component)
         try Task.checkCancellation()
-        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let connection = try await runtime.connection(componentHash: hash)
+        await runtime.prepare()
+        let verified = try await component(definition.component)
         try Task.checkCancellation()
-        let identity = try JSONSerialization.data(withJSONObject: ["key": site.key, "class": definition.className, "component": hash, "extend": definition.extend, "headers": site.headers], options: [.sortedKeys])
+        let connection = try await runtime.connection(componentHash: verified.hash)
+        do {
+            return try await perform(verified, site: site, definition: definition, command: command, arguments: arguments, connection: connection)
+        } catch CSPWorkerFailure.sessionLimit {
+            try Task.checkCancellation()
+            let renewed = try await runtime.renewConnection(componentHash: verified.hash, replacing: connection)
+            return try await perform(verified, site: site, definition: definition, command: command, arguments: arguments, connection: renewed)
+        }
+    }
+
+    private func perform(_ verified: VerifiedComponent, site: Site, definition: CSPDefinition, command: CSPCommand,
+                         arguments: [String: String], connection: CSPWorkerConnection) async throws
+        -> (data: Data, connection: CSPWorkerConnection, session: String) {
+        try Task.checkCancellation()
+        let identity = try JSONSerialization.data(withJSONObject: ["key": site.key, "class": definition.className, "component": verified.hash, "extend": definition.extend, "headers": site.headers], options: [.sortedKeys])
         let session = SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
         let loadKey = connection.token + session
-        let module: [String: Any] = ["protocol": 1, "command": "load", "session": session, "class": definition.className, "extend": definition.extend, "sha256": hash, "module": data.base64EncodedString()]
-        try await ensureLoaded(module, key: loadKey, connection: connection)
+        try await ensureLoaded(verified, definition: definition, session: session, key: loadKey, connection: connection)
         try Task.checkCancellation()
         let encoded = try JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
         let callKey = loadKey + command.rawValue + SHA256.hash(data: encoded).map { String(format: "%02x", $0) }.joined()
@@ -152,7 +184,7 @@ public actor CSPRPCTransport: CSPTransport {
                 // Android can restart a killed Worker without rebooting the VM.
                 // Reinitialize this source once; never retain a stale load cache.
                 self.loads.removeValue(forKey: loadKey)
-                try await self.ensureLoaded(module, key: loadKey, connection: connection)
+                try await self.ensureLoaded(verified, definition: definition, session: session, key: loadKey, connection: connection)
                 response = try await self.request(payload, connection: connection)
             }
             guard let value = response["result"], JSONSerialization.isValidJSONObject(value) else { throw TVError.message("爬虫运行组件未返回有效的数据。") }
@@ -162,10 +194,12 @@ public actor CSPRPCTransport: CSPTransport {
         defer { calls.removeValue(forKey: callKey) }
         return (try await task.value, connection, session)
     }
-    private func ensureLoaded(_ module: [String: Any], key: String, connection: CSPWorkerConnection) async throws {
+    private func ensureLoaded(_ component: VerifiedComponent, definition: CSPDefinition, session: String, key: String, connection: CSPWorkerConnection) async throws {
         if loads[key] == nil {
             if loads.count >= 32 { loads.removeAll() }
             loads[key] = Task {
+                let module: [String: Any] = ["protocol": 1, "command": "load", "session": session, "class": definition.className,
+                                             "extend": definition.extend, "sha256": component.hash, "module": component.bytes.base64EncodedString()]
                 let response = try await self.request(module, connection: connection)
                 guard response["loaded"] as? Bool == true else { throw TVError.message("爬虫组件未能完成初始化，请重试。") }
             }
@@ -194,6 +228,7 @@ public actor CSPRPCTransport: CSPTransport {
         }
         if let error = object["error"] as? String {
             if error == "SESSION_MISSING" { throw CSPWorkerFailure.sessionMissing }
+            if error == "SESSION_LIMIT" { throw CSPWorkerFailure.sessionLimit }
             let message: String
             switch error {
             case "ENTRY_CLASS_MISSING": throw CSPFailure.entryClassMissing

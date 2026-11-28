@@ -376,6 +376,8 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private var livePlan: LiveRoutePlan?
     private var liveHeaders: [String: String] = [:]
     private var onLiveRoute: ((Int) -> Void)?
+    private var liveBackupTask: Task<Void, Never>?
+    private var liveBackupSession: VLCPlaybackSession?
     private struct PlaybackRequest {
         let episode: Episode
         let headers: [String: String]
@@ -426,6 +428,62 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         clearAttempt(); error = nil; failure = nil
         onLiveRoute?(index)
         begin(plan.episodes[index], headers: liveHeaders, isLive: true)
+        if plan.attemptedCount == 1 { prepareLiveBackup() }
+    }
+
+    private var canPrepareLiveBackup: Bool {
+        !ready && !systemPlayback && !airPlayPreparing && !airPlayRouteSelected &&
+            !pendingPiP && pendingCastDevice == nil && dlna.selectedDevice == nil &&
+            liveHeaders.keys.allSatisfy { ["user-agent", "referer", "referrer"].contains($0.lowercased()) }
+    }
+
+    private func prepareLiveBackup() {
+        guard canPrepareLiveBackup, currentRequest != nil, let plan = livePlan, let index = plan.nextIndex,
+              let url = URL(string: plan.episodes[index].url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+        let token = generation
+        liveBackupTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            guard let self, self.generation == token, self.canPrepareLiveBackup else { return }
+            let surface = self.videoSurface.view
+            let view = VLCVideoView(frame: surface.bounds)
+            view.backColor = .black; view.fillScreen = false
+            view.autoresizingMask = [.width, .height]
+            view.alphaValue = 0
+            surface.addSubview(view, positioned: .below, relativeTo: nil)
+            defer { if surface.vlcView !== view { view.removeFromSuperview() } }
+            let session = VLCPlaybackSession(url: url, headers: self.liveHeaders, drawable: view, position: 0, paused: false,
+                                             rate: self.rate, volume: 0, muted: true)
+            self.liveBackupSession = session
+            session.start()
+            for _ in 0..<60 {
+                do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+                guard self.generation == token, self.canPrepareLiveBackup, self.liveBackupSession === session else { break }
+                if session.playing && session.position > 0.1 &&
+                    (session.player.hasVideoOut || session.player.numberOfAudioTracks > 0) {
+                    guard self.livePlan?.next() == index else { break }
+                    self.liveBackupSession = nil
+                    self.liveBackupTask = nil
+                    self.clearAttempt()
+                    self.currentRequest = PlaybackRequest(episode: plan.episodes[index], headers: self.liveHeaders,
+                                                          position: 0, isLive: true, resumePaused: false)
+                    self.onLiveRoute?(index)
+                    self.videoSurface.setSystemPlayback(false)
+                    view.alphaValue = 1
+                    surface.useVLCView(view)
+                    self.installVLCSession(session, token: self.generation)
+                    session.setRate(self.rate); session.setVolume(self.nativeVolume); session.setMuted(self.nativeMuted)
+                    self.ready = true; self.becameReady()
+                    return
+                }
+                if [.error, .ended].contains(session.player.state) { break }
+            }
+            if self.liveBackupSession === session { self.cancelLiveBackup() }
+        }
+    }
+
+    private func cancelLiveBackup() {
+        liveBackupTask?.cancel(); liveBackupTask = nil
+        liveBackupSession?.stop(); liveBackupSession = nil
     }
     private func connectionText(_ text: String) -> String {
         guard let plan = livePlan, let index = plan.currentIndex else { return text }
@@ -479,6 +537,21 @@ enum LiveLayout: String, CaseIterable, Identifiable {
     private func loadVLC(_ url: URL, headers: [String: String], position: Double, token: UUID, resumePaused: Bool) {
         connectingMessage = connectionText(tlsRetryAttempted ? "正在重新连接片源…" : "正在连接片源…")
         let session = VLCPlaybackSession(url: url, headers: headers, drawable: videoSurface.view.prepareVLCView(), position: position, paused: resumePaused, rate: rate, volume: nativeVolume, muted: nativeMuted)
+        installVLCSession(session, token: token)
+        connectionTimeout = Task { @MainActor [weak self] in
+            for _ in 0..<150 {
+                do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+                guard let self, self.generation == token, self.nativeSession === session, !self.ready else { return }
+                self.markNativeReady(session)
+                if self.ready { return }
+            }
+            guard let self, self.generation == token, !self.ready else { return }
+            self.handleNativeFailure(token: token, error: session.player.state == .opening ? URLError(.timedOut) : nil)
+        }
+        session.start()
+    }
+
+    private func installVLCSession(_ session: VLCPlaybackSession, token: UUID) {
         nativeSession = session
         session.onState = { [weak self, weak session] state in
             guard let self, let session, self.generation == token, self.nativeSession === session else { return }
@@ -502,17 +575,6 @@ enum LiveLayout: String, CaseIterable, Identifiable {
             default: break
             }
         }
-        connectionTimeout = Task { @MainActor [weak self] in
-            for _ in 0..<150 {
-                do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
-                guard let self, self.generation == token, self.nativeSession === session, !self.ready else { return }
-                self.markNativeReady(session)
-                if self.ready { return }
-            }
-            guard let self, self.generation == token, !self.ready else { return }
-            self.handleNativeFailure(token: token, error: session.player.state == .opening ? URLError(.timedOut) : nil)
-        }
-        session.start()
     }
     private func loadMPV(_ url: URL, headers: [String: String], position: Double, token: UUID, resumePaused: Bool) async throws {
         let session = try await MPVPlaybackSession.make(url: url, headers: headers, position: position, paused: resumePaused, rate: rate, volume: nativeVolume, muted: nativeMuted)
@@ -735,6 +797,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         if let failToken { NotificationCenter.default.removeObserver(failToken) }; failToken = nil
     }
     private func becameReady() {
+        cancelLiveBackup()
         onReady?()
         if let device = pendingCastDevice { pendingCastDevice = nil; cast(to: device) }
     }
@@ -777,6 +840,7 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         systemPlayback = false; storedVideoSurface?.setSystemPlayback(false)
     }
     private func clearAttempt() {
+        cancelLiveBackup()
         playbackAuthorization = nil
         cancelAirPlayPreparation()
         mpvLoadTask?.cancel(); mpvLoadTask = nil
@@ -1036,12 +1100,13 @@ enum LiveLayout: String, CaseIterable, Identifiable {
         loading = true
         let selectedCategory = category; let search = filtersLoadedVideos ? "" : submittedQuery; let targetPage = append ? page + 1 : 1
         let selectedSiteID = siteID
+        let previousPages = videos
+        let previousIDs = Set(previousPages.map(\.id))
         catalogTask = Task {
             do {
                 let loaded = try await service.catalogRefreshingCSP(source: source, siteID: selectedSiteID, category: selectedCategory, search: search, page: targetPage)
                 let result = loaded.catalog
                 let resultSite = (loaded.refreshed ?? source).runtimeSite(selectedSiteID)
-                let checkedVideos = await service.checkedCatalogVideos(result.videos, site: resultSite, availability: availability)
                 guard !Task.isCancelled, requestID == token else { return }
                 if let refreshed = loaded.refreshed {
                     guard sourceLibrary.vodSources.first(where: { $0.id == source.id }) == source else { loading = false; return }
@@ -1049,8 +1114,23 @@ enum LiveLayout: String, CaseIterable, Identifiable {
                     persistLibrary()
                 }
                 categories = loaded.categories ?? result.categories
-                if append { var ids = Set(videos.map(\.id)); videos += checkedVideos.filter { ids.insert($0.id).inserted } } else { videos = checkedVideos }
-                page = targetPage; pageCount = result.pageCount; loading = false
+                page = targetPage; pageCount = result.pageCount
+                func makePage(_ entries: [Video]) -> [Video] {
+                    guard append else { return entries }
+                    var ids = previousIDs
+                    return previousPages + entries.filter { ids.insert($0.id).inserted }
+                }
+                if let resultSite, resultSite.supported {
+                    let preview = await service.catalogPreview(result.videos, site: resultSite, availability: availability)
+                    guard !Task.isCancelled, requestID == token else { return }
+                    let previewPage = makePage(preview)
+                    if videos != previewPage { videos = previewPage }
+                }
+                let checked = await service.checkedCatalogVideos(result.videos, site: resultSite, availability: availability)
+                guard !Task.isCancelled, requestID == token else { return }
+                let validatedPage = makePage(checked)
+                if videos != validatedPage { videos = validatedPage }
+                loading = false
             } catch {
                 guard !Task.isCancelled, requestID == token else { return }
                 catalogNeedsRepositorySelection = (error as? CSPFailure) == .entryClassMissing

@@ -78,6 +78,8 @@ public actor CSPBundledRuntime: CSPRuntimeProvider {
     private var host: CSPHostProcess?
     private var hash: String?
     private var active: CSPWorkerConnection?
+    private let clock = ContinuousClock()
+    private var lastHealthy: ContinuousClock.Instant?
     private var pending: (id: UUID, task: Task<CSPWorkerConnection, Error>)?
     private var diagnosticCount = 0
     private let session: URLSession
@@ -96,6 +98,18 @@ public actor CSPBundledRuntime: CSPRuntimeProvider {
         configuration.timeoutIntervalForRequest = 1; configuration.timeoutIntervalForResource = 2
         session = URLSession(configuration: configuration, delegate: CSPNoRedirect(), delegateQueue: nil)
     }
+    public func prepare() async {
+        guard available, pending == nil, host?.running != true else { return }
+        // Boot needs neither a JAR nor its checksum. Leave the worker unclaimed
+        // until the transport finishes downloading and validating a component.
+        pending = (UUID(), Task { try await self.launch(nil) })
+    }
+
+    public func renewConnection(componentHash: String, replacing previous: CSPWorkerConnection) async throws -> CSPWorkerConnection {
+        if pending == nil, hash == componentHash, active?.token == previous.token { active = nil }
+        return try await connection(componentHash: componentHash)
+    }
+
     public func connection(componentHash: String) async throws -> CSPWorkerConnection {
         guard componentHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { throw TVError.message("爬虫组件标识无效。") }
         guard available else { throw TVError.message("这个安装包没有包含爬虫运行时，请安装带 CSP 组件的完整版本。") }
@@ -106,11 +120,20 @@ public actor CSPBundledRuntime: CSPRuntimeProvider {
             try Task.checkCancellation()
             return try await connection(componentHash: componentHash)
         }
-        if hash == componentHash, let active, host?.running == true {
+        if (hash == nil || hash == componentHash), let active, let currentHost = host, currentHost.running {
+            hash = componentHash
+            if let lastHealthy, clock.now - lastHealthy < .seconds(2) { return active }
             for _ in 0..<2 {
-                if await healthy(active) { return active }
+                let responded = await healthy(active)
                 try Task.checkCancellation()
+                guard host === currentHost, pending == nil, hash == componentHash else {
+                    return try await connection(componentHash: componentHash)
+                }
+                if responded { lastHealthy = clock.now; return active }
                 try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            guard host === currentHost, pending == nil, hash == componentHash else {
+                return try await connection(componentHash: componentHash)
             }
         }
         let task = Task { try await self.launch(componentHash) }
@@ -146,9 +169,9 @@ public actor CSPBundledRuntime: CSPRuntimeProvider {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
         return object["protocol"] as? Int == 1 && object["runtime"] as? String == "android-art"
     }
-    private func launch(_ componentHash: String) async throws -> CSPWorkerConnection {
+    private func launch(_ componentHash: String?) async throws -> CSPWorkerConnection {
         diagnosticCount = 0
-        let old = host; active = nil; hash = nil; old?.stop()
+        let old = host; active = nil; hash = nil; lastHealthy = nil; old?.stop()
         // The previous supervisor releases the data-disk lock after shutdown.
         let stoppedBy = Date().addingTimeInterval(14)
         while old?.running == true && Date() < stoppedBy { try await Task.sleep(nanoseconds: 100_000_000) }
@@ -163,7 +186,7 @@ public actor CSPBundledRuntime: CSPRuntimeProvider {
                 if let result = next.result {
                     let connection = try result.get()
                     if await healthy(connection) {
-                        active = connection; hash = componentHash; return connection
+                        active = connection; hash = componentHash; lastHealthy = clock.now; return connection
                     }
                 }
                 guard next.running else { throw TVError.message("内置爬虫运行时已退出，请重试。") }
